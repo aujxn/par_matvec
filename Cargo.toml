@@ -1,0 +1,13 @@
+[package]
+name = "par_matvec"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+faer = "0.22.6"
+faer-ext = "0.6.0"
+nalgebra = "0.34.0"
+nalgebra-sparse = "0.11.0"
+ndarray = "0.16.1"
+rayon = "1.10.0"
+sprs = "0.11.3"
