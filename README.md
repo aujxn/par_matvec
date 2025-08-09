@@ -15,6 +15,9 @@ cargo bench --bench sparse_matvec
 # Run correctness tests
 cargo test
 
+# Generate results tables
+python3 parse_criterion_benchmarks.py
+
 # View results
 cat BENCHMARK_RESULTS.md
 ```
