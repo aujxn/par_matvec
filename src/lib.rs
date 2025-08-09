@@ -1,19 +1,28 @@
-use std::num::NonZero;
 use faer::{
-    dyn_stack::{MemBuffer, MemStack, StackReq}, linalg::{temp_mat_scratch, temp_mat_zeroed}, mat::AsMatMut, prelude::{Reborrow, ReborrowMut}, sparse::{linalg::matmul::sparse_dense_matmul as seq_sparse_dense, SparseColMatRef, SymbolicSparseColMatRef}, traits::{ComplexField, math_utils::zero}, Accum, ColMut, ColRef, Index, MatMut, MatRef, Par
+    Accum, ColMut, ColRef, Index, MatMut, MatRef, Par,
+    dyn_stack::{MemStack, StackReq},
+    linalg::{temp_mat_scratch, temp_mat_zeroed},
+    mat::AsMatMut,
+    prelude::Reborrow,
+    sparse::{
+        SparseColMatRef, SymbolicSparseColMatRef,
+        linalg::matmul::sparse_dense_matmul as seq_sparse_dense,
+    },
+    traits::{ComplexField, math_utils::zero},
 };
+
+pub mod test_utils;
 
 // could probably replace with existing `SparseMatMulInfo` but may be less efficient since cannot
 // store the associated columns (`log(ncols)` extra lookup complexity per thread each matvec)
 pub struct SparseDenseStrategy {
     thread_cols: Vec<usize>,
-    thread_indptrs : Vec<usize>
+    thread_indptrs: Vec<usize>,
 }
 
 impl SparseDenseStrategy {
-    fn new<I: Index>(mat: SymbolicSparseColMatRef<'_, I>, par: Par) -> Self {
-        let (thread_cols, thread_indptrs) =
-        match par {
+    pub fn new<I: Index>(mat: SymbolicSparseColMatRef<'_, I>, par: Par) -> Self {
+        let (thread_cols, thread_indptrs) = match par {
             Par::Seq => (Vec::new(), Vec::new()),
             Par::Rayon(n_threads) => {
                 let n_threads = n_threads.get();
@@ -32,13 +41,16 @@ impl SparseDenseStrategy {
 
                 match mat.col_nnz() {
                     None => {
-                        thread_indptrs.extend((0..n_threads).map(|thread_id| thread_id * per_thread));
-                        thread_indptrs.push(col_ptrs[ncols + 1].zx());
+                        thread_indptrs
+                            .extend((0..n_threads).map(|thread_id| thread_id * per_thread));
+                        thread_indptrs.push(col_ptrs[ncols].zx());
                         thread_cols.push(0);
 
                         let mut nnz_counter = 0;
                         let mut thread_id = 1;
-                        for (col, (start, end)) in col_ptrs.iter().zip(col_ptrs.iter().skip(1)).enumerate() {
+                        for (col, (start, end)) in
+                            col_ptrs.iter().zip(col_ptrs.iter().skip(1)).enumerate()
+                        {
                             let col_nnz = end.zx() - start.zx();
                             nnz_counter += col_nnz;
 
@@ -47,25 +59,25 @@ impl SparseDenseStrategy {
                                 thread_id += 1;
                             }
                         }
-                        thread_cols.push(ncols);
+                        thread_cols.push(ncols - 1);
                         assert_eq!(thread_cols.len(), n_threads + 1);
-                    },
+                    }
                     Some(_nnz_per_col) => {
                         unimplemented!();
                     }
                 }
                 (thread_cols, thread_indptrs)
-            },
+            }
         };
 
-        Self { thread_cols, thread_indptrs}
+        Self {
+            thread_cols,
+            thread_indptrs,
+        }
     }
 }
 
-fn sparse_dense_scratch<
-    I: Index,
-    T: ComplexField,
->(
+pub fn sparse_dense_scratch<I: Index, T: ComplexField>(
     lhs: SparseColMatRef<'_, I, T>,
     rhs: MatRef<'_, T>,
     par: Par,
@@ -92,10 +104,7 @@ fn sparse_dense_scratch<
 ///   columns. Should be balanced enough? requires no workspace and less syncronization
 ///   - Otherwise, split the thread work by input columns and iterate over output columns.
 ///   One workspace vector per thread and synchronization after each matvec to sum workspaces
-fn sparse_dense_matmul<
-    I: Index,
-    T: ComplexField,
->(
+pub fn sparse_dense_matmul<I: Index, T: ComplexField>(
     dst: MatMut<'_, T>,
     beta: Accum,
     lhs: SparseColMatRef<'_, I, T>,
@@ -122,10 +131,7 @@ fn sparse_dense_matmul<
 }
 
 //#[cfg(feature = "rayon")]
-fn par_sparse_matvec<
-    I: Index,
-    T: ComplexField,
->(
+fn par_sparse_matvec<I: Index, T: ComplexField>(
     dst: ColMut<'_, T>,
     beta: Accum,
     lhs: SparseColMatRef<'_, I, T>,
@@ -134,7 +140,7 @@ fn par_sparse_matvec<
     n_threads: usize,
     strategy: &SparseDenseStrategy,
     stack: &mut MemStack,
-    ) {
+) {
     let m = lhs.nrows();
     let (mut work, _) = temp_mat_zeroed::<T, _, _>(m, n_threads, stack);
     let work = work.as_mat_mut();
@@ -180,27 +186,25 @@ fn par_sparse_matvec<
         dst.fill(zero());
     }
 
-    // TODO sum in parallel also
-    //for (i, dst) in dst.par_iter_mut().enumerate() {
+    let mut rows_per_thread = work.nrows() / n_threads;
+    if rows_per_thread == 0 {
+        rows_per_thread = 1;
+    }
+
+    // TODO sum in parallel using chunks might be better
+    dst.as_mat_mut()
+        .par_row_chunks_mut(rows_per_thread)
+        .zip(work.par_row_chunks(rows_per_thread))
+        .for_each(|(dst_chunk, work_chunk)| {
+            for (i, mut dst) in dst_chunk.row_iter_mut().enumerate() {
+                let work_row = work_chunk.row(i);
+                dst[0] = dst[0].add_by_ref(&work_row.sum());
+            }
+        })
+    /*
     for (i, dst) in dst.iter_mut().enumerate() {
         let work_row = work.row(i);
         *dst = dst.add_by_ref(&work_row.sum());
     }
-
-}
-
-fn bench() {
-    let n_threads = NonZero::new(32).unwrap();
-    let par = Par::Rayon(n_threads);
-
-    let lhs_symbolic = ;
-    let lhs = ;
-    let rhs = ;
-    let dst = ;
-
-    let stack_req = sparse_dense_scratch(lhs, rhs, par);
-    let stack = MemStack::new(&mut MemBuffer::try_new(stack_req).unwrap());
-    let strategy = SparseDenseStrategy::new(lhs_symbolic, par);
-
-    sparse_dense_matmul(dst, beta, lhs, rhs, alpha, par, &strategy, stack);
+    */
 }
