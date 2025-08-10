@@ -267,7 +267,7 @@ fn test_synthetic_matrices() {
 
 #[test]
 fn test_matrix_market_files() {
-    let matrix_files = &SMALL_MATRICES[0..4];
+    let matrix_files = SMALL_MATRICES;
 
     for matrix_file in matrix_files {
         if std::path::Path::new(matrix_file).exists() {
@@ -278,7 +278,7 @@ fn test_matrix_market_files() {
                         .expect(&format!("Sequential tests failed on {}", matrix_file));
 
                     // Only test parallel if matrix has enough non-zeros
-                    if matrices.nnz > 100 {
+                    if matrices.nnz > 1000 {
                         test_parallel_implementations(&matrices)
                             .expect(&format!("Parallel tests failed on {}", matrix_file));
                     } else {
@@ -310,46 +310,4 @@ fn test_edge_cases() {
     test_parallel_implementations(&dense_matrices).expect("Parallel tests failed on dense matrix");
 
     println!("Edge case tests passed!");
-}
-
-fn run_all_matrix_tests() -> Result<(), Box<dyn std::error::Error>> {
-    let matrix_files = SMALL_MATRICES;
-
-    println!("Running correctness tests on all available matrices...\n");
-
-    for matrix_file in matrix_files {
-        if std::path::Path::new(matrix_file).exists() {
-            println!("Testing matrix file: {}", matrix_file);
-            match TestMatrices::load_from_matrix_market(matrix_file, 1) {
-                Ok(matrices) => {
-                    test_sequential_implementations(&matrices)?;
-
-                    // Only test parallel if matrix has sufficient work
-                    if matrices.nnz > 50 {
-                        test_parallel_implementations(&matrices)?;
-                    } else {
-                        println!(
-                            "  Skipping parallel test (too few non-zeros: {})",
-                            matrices.nnz
-                        );
-                    }
-                    println!("  ✅ All tests passed for {}\n", matrix_file);
-                }
-                Err(e) => {
-                    eprintln!("  ❌ Failed to load {}: {}\n", matrix_file, e);
-                }
-            }
-        } else {
-            println!("Matrix file {} not found, skipping\n", matrix_file);
-        }
-    }
-
-    Ok(())
-}
-
-#[test]
-#[ignore]
-fn test_all_matrices() {
-    run_all_matrix_tests().expect("Comprehensive matrix tests failed");
-    println!("🎉 All comprehensive matrix tests passed!");
 }

@@ -49,17 +49,14 @@ impl TestMatrices {
         let path = path.as_ref();
         let matrix_name = path.file_stem().unwrap().to_string_lossy().to_string();
 
-        // Load using nalgebra-sparse (most reliable for matrix-market format)
         let coo_matrix: CooMatrix<f64> = load_coo_from_matrix_market_file(path)?;
 
         let nrows = coo_matrix.nrows();
         let ncols = coo_matrix.ncols();
         let nnz = coo_matrix.nnz();
 
-        // Convert to different formats
         let nalgebra_csr = CsrMatrix::from(&coo_matrix);
 
-        // Convert to sprs format
         let (row_indices, col_indices, values) = coo_matrix.disassemble();
         let mut sprs_triplet = TriMat::new((nrows, ncols));
         for ((row, col), val) in row_indices
@@ -71,7 +68,6 @@ impl TestMatrices {
         }
         let sprs_csr = sprs_triplet.to_csr();
 
-        // Convert to faer format - need to build from triplets
         let faer_triplets: Vec<Triplet<usize, usize, f64>> = row_indices
             .iter()
             .zip(col_indices.iter())
@@ -82,15 +78,12 @@ impl TestMatrices {
         let faer_csc =
             SparseColMat::<usize, f64>::try_new_from_triplets(nrows, ncols, &faer_triplets)?;
 
-        // Create RHS vector (deterministic for tests, random for benchmarks)
         let mut rhs_vector = Mat::zeros(ncols, rhs_cols);
         for j in 0..rhs_cols {
             for i in 0..ncols {
                 if rhs_cols == 1 {
-                    // Deterministic for correctness tests
                     rhs_vector[(i, j)] = (i as f64 * 0.1 + 1.0) % 10.0;
                 } else {
-                    // Pseudo-random for benchmarks using deterministic pattern
                     rhs_vector[(i, j)] = ((i + j * 1000) as f64 * 0.0001) % 1.0;
                 }
             }
@@ -110,13 +103,10 @@ impl TestMatrices {
 
     /// Create a synthetic test matrix with deterministic pattern
     pub fn create_synthetic(nrows: usize, ncols: usize, density: f64) -> Self {
-        // Create deterministic synthetic matrix for reproducible testing
         let mut triplets = Vec::new();
 
-        // Use a simple pattern to generate deterministic non-zeros
         for i in 0..nrows {
             for j in 0..ncols {
-                // Use deterministic pattern instead of random
                 if ((i * 7 + j * 11) % 100) as f64 / 100.0 < density {
                     let value = (i as f64 + j as f64 * 0.1 + 1.0) % 5.0 + 0.1; // Avoid zeros
                     triplets.push(Triplet::new(i, j, value));
@@ -124,15 +114,12 @@ impl TestMatrices {
             }
         }
 
-        // Create faer matrix
         let faer_csc =
             SparseColMat::<usize, f64>::try_new_from_triplets(nrows, ncols, &triplets).unwrap();
 
-        // Convert to other formats for testing
         let tuple_triplets: Vec<(usize, usize, f64)> =
             triplets.iter().map(|t| (t.row, t.col, t.val)).collect();
 
-        // Create COO matrix for conversion
         let row_indices: Vec<usize> = tuple_triplets.iter().map(|&(r, _, _)| r).collect();
         let col_indices: Vec<usize> = tuple_triplets.iter().map(|&(_, c, _)| c).collect();
         let values: Vec<f64> = tuple_triplets.iter().map(|&(_, _, v)| v).collect();
@@ -141,14 +128,12 @@ impl TestMatrices {
             CooMatrix::try_from_triplets(nrows, ncols, row_indices, col_indices, values).unwrap();
         let nalgebra_csr = CsrMatrix::from(&coo_matrix);
 
-        // Create sprs format
         let mut sprs_triplet = TriMat::new((nrows, ncols));
         for &(row, col, val) in &tuple_triplets {
             sprs_triplet.add_triplet(row, col, val);
         }
         let sprs_csr = sprs_triplet.to_csr();
 
-        // Create deterministic rhs vector
         let mut rhs_vector = Mat::zeros(ncols, 1);
         for i in 0..ncols {
             rhs_vector[(i, 0)] = (i as f64 * 0.1 + 1.0) % 10.0;
@@ -186,14 +171,12 @@ impl SimpleMatrixLoader {
         let path = path.as_ref();
         let matrix_name = path.file_stem().unwrap().to_string_lossy().to_string();
 
-        // Load using nalgebra-sparse (most reliable for matrix-market format)
         let coo_matrix: CooMatrix<f64> = load_coo_from_matrix_market_file(path)?;
 
         let nrows = coo_matrix.nrows();
         let ncols = coo_matrix.ncols();
         let nnz = coo_matrix.nnz();
 
-        // Only convert to faer format for parallel benchmarks
         let (row_indices, col_indices, values) = coo_matrix.disassemble();
         let faer_triplets: Vec<Triplet<usize, usize, f64>> = row_indices
             .iter()
@@ -205,7 +188,6 @@ impl SimpleMatrixLoader {
         let faer_csc =
             SparseColMat::<usize, f64>::try_new_from_triplets(nrows, ncols, &faer_triplets)?;
 
-        // Create pseudo-random RHS vector for benchmarks
         let mut rhs_vector = Mat::zeros(ncols, rhs_cols);
         for j in 0..rhs_cols {
             for i in 0..ncols {
@@ -225,13 +207,10 @@ impl SimpleMatrixLoader {
 
     /// Create a synthetic test matrix for parallel benchmarks only
     pub fn create_synthetic(nrows: usize, ncols: usize, density: f64) -> Self {
-        // Create deterministic synthetic matrix for reproducible testing
         let mut triplets = Vec::new();
 
-        // Use a simple pattern to generate deterministic non-zeros
         for i in 0..nrows {
             for j in 0..ncols {
-                // Use deterministic pattern instead of random
                 if ((i * 7 + j * 11) % 100) as f64 / 100.0 < density {
                     let value = (i as f64 + j as f64 * 0.1 + 1.0) % 5.0 + 0.1; // Avoid zeros
                     triplets.push(Triplet::new(i, j, value));
@@ -239,11 +218,9 @@ impl SimpleMatrixLoader {
             }
         }
 
-        // Create faer matrix
         let faer_csc =
             SparseColMat::<usize, f64>::try_new_from_triplets(nrows, ncols, &triplets).unwrap();
 
-        // Create pseudo-random rhs vector for benchmarks
         let mut rhs_vector = Mat::zeros(ncols, 1);
         for i in 0..ncols {
             rhs_vector[(i, 0)] = ((i * 17) as f64 * 0.0001) % 1.0;

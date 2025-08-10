@@ -12,8 +12,7 @@ The benchmark suite tests:
    - `sprs` CSR multiplication
 
 2. **Parallel Thread Scaling**:
-   - Custom parallel implementation with 1, 2, 4, 8, threads
-   - Tests using `SparseDenseStrategy` and `sparse_dense_matmul`
+   - Custom parallel implementation with varying threads
 
 ## Quick Start
 
@@ -33,11 +32,7 @@ To benchmark additional matrices, edit `benches/sparse_matvec.rs` and add file p
 
 ```bash
 # Run all benchmarks
-cargo bench --bench sparse_matvec
-
-# Run specific benchmark groups
-cargo bench --bench sparse_matvec -- sequential
-cargo bench --bench sparse_matvec -- thread_scaling
+cargo bench
 ```
 
 ## Benchmark Structure
@@ -48,21 +43,13 @@ cargo bench --bench sparse_matvec -- thread_scaling
 - **`sprs`**: Uses sprs CSR matrix-vector multiplication
 
 ### Thread Scaling Tests
-- Tests a parallel implementation with 1, 2, 4, 8 threads
+- Tests a parallel implementation with varying threads
 - Uses `SparseDenseStrategy` to distribute work across threads
 - Measures performance scaling and parallel efficiency
 
-## Output and Results
-
-### Console Output
-The benchmarks print:
-- Matrix dimensions and non-zero count for each test matrix
-- Performance measurements in iterations per second
-- Thread scaling results
-
-### HTML Reports
+## HTML Reports
 Detailed results are saved to `target/criterion/`:
-- Open `target/criterion/report/index.html` for interactive reports
+- Open `target/criterion/report/index.html` for reports
 - Includes plots showing performance comparisons and thread scaling
 
 ## Matrix Requirements
@@ -70,4 +57,4 @@ Detailed results are saved to `target/criterion/`:
 Your Matrix Market files should:
 - Be in standard Matrix Market coordinate format (`.mtx`)
 - Contain real-valued sparse matrices
-- Have sufficient non-zeros for meaningful parallel testing (> 1000 recommended)
+- Have sufficient non-zeros for meaningful parallel testing (> 1000)
