@@ -5,29 +5,25 @@ use faer::{Mat, Par};
 use nalgebra::DVector;
 
 use par_matvec::test_utils::{LARGE_MATRICES, SMALL_MATRICES, SimpleMatrixLoader, TestMatrices};
-use par_matvec::{SparseDenseStrategy, sparse_dense_matmul, sparse_dense_scratch};
-
-// TestMatrices struct and implementation moved to test_utils module
+use par_matvec::{
+    SparseDenseStrategy, dense_sparse_matmul, sparse_dense_matmul, sparse_dense_scratch,
+};
 
 fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) {
     let mut group = c.benchmark_group(format!(
         "sequential_matvec_{}-{}x{}_nnz{}",
         matrices.matrix_name, matrices.nrows, matrices.ncols, matrices.nnz
     ));
-    group.sample_size(100); // Increased sample size for more reliable measurements
+    group.sample_size(100);
 
-    // Prepare output vectors
     let mut faer_output = Mat::zeros(matrices.nrows, matrices.rhs_vector.ncols());
     let rhs_col = matrices.rhs_vector.col(0);
 
-    // Convert faer rhs to nalgebra format for nalgebra benchmarks
     let nalgebra_rhs = DVector::from_iterator(matrices.rhs_vector.nrows(), rhs_col.iter().copied());
 
-    // Convert to sprs format
     let sprs_rhs: Vec<f64> = rhs_col.iter().copied().collect();
     let mut sprs_output = vec![0.0; matrices.nrows];
 
-    // Benchmark faer sequential
     group.bench_with_input(
         BenchmarkId::new(
             "faer",
@@ -48,7 +44,6 @@ fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) 
         },
     );
 
-    // Benchmark nalgebra-sparse using operator overloading
     group.bench_with_input(
         BenchmarkId::new(
             "nalgebra",
@@ -62,7 +57,6 @@ fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) 
         },
     );
 
-    // Benchmark sprs
     group.bench_with_input(
         BenchmarkId::new(
             "sprs",
@@ -90,8 +84,17 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
     ));
     group.sample_size(100);
 
-    let thread_counts = [1, 2, 4, 8];
+    let cpus = num_cpus::get();
+    let mut thread_counts = Vec::new();
+    let mut n_threads = 1;
+    while n_threads <= cpus {
+        thread_counts.push(n_threads);
+        n_threads *= 2;
+    }
+
     let rhs_cols = loader.rhs_vector.ncols();
+    let lhs = loader.rhs_vector.transpose();
+    let lhs_rows = lhs.nrows();
 
     for &num_threads in &thread_counts {
         if let Some(n_threads) = NonZero::new(num_threads) {
@@ -103,14 +106,17 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
             let mut output = Mat::zeros(loader.nrows, rhs_cols);
             let strategy = SparseDenseStrategy::new(loader.faer_csc.symbolic(), par);
 
-            // Prepare stack for the parallel implementation
-            let stack_req =
-                sparse_dense_scratch(loader.faer_csc.as_ref(), loader.rhs_vector.as_ref(), par);
+            let stack_req = sparse_dense_scratch(
+                loader.faer_csc.as_ref(),
+                loader.rhs_vector.as_ref(),
+                &strategy,
+                par,
+            );
             let mut stack_buffer = faer::dyn_stack::MemBuffer::try_new(stack_req).unwrap();
             let mut stack = faer::dyn_stack::MemStack::new(&mut stack_buffer);
 
             group.bench_with_input(
-                BenchmarkId::new("parallel", format!("{}_threads", num_threads)),
+                BenchmarkId::new("sparse_dense", format!("{}_threads", num_threads)),
                 &(loader, par, &strategy),
                 |b, (loader, par, strategy)| {
                     b.iter(|| {
@@ -119,6 +125,26 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
                             faer::Accum::Replace,
                             loader.faer_csc.as_ref(),
                             loader.rhs_vector.as_ref(),
+                            1.0,
+                            *par,
+                            strategy,
+                            &mut stack,
+                        );
+                    })
+                },
+            );
+
+            let mut output = Mat::zeros(lhs_rows, loader.ncols);
+            group.bench_with_input(
+                BenchmarkId::new("dense_sparse", format!("{}_threads", num_threads)),
+                &(loader, par, &strategy),
+                |b, (loader, par, strategy)| {
+                    b.iter(|| {
+                        dense_sparse_matmul(
+                            output.as_mut(),
+                            faer::Accum::Replace,
+                            lhs.as_ref(),
+                            loader.faer_csc.as_ref(),
                             1.0,
                             *par,
                             strategy,
@@ -152,14 +178,12 @@ fn sequential_benchmarks(c: &mut Criterion) {
         }
     }
 
-    // Add synthetic test case
     create_synthetic_benchmark_sequential(c);
 }
 
 fn parallel_scaling_benchmarks(c: &mut Criterion) {
     println!("Running parallel thread scaling benchmark...");
 
-    // Use large matrices for parallel scaling tests
     for matrix_file in LARGE_MATRICES.iter().chain(SMALL_MATRICES.iter()) {
         match SimpleMatrixLoader::load_from_matrix_market(matrix_file, 1) {
             Ok(loader) => {
@@ -176,11 +200,9 @@ fn parallel_scaling_benchmarks(c: &mut Criterion) {
         }
     }
 
-    // Add synthetic test case for parallel scaling
     create_synthetic_benchmark_parallel(c);
 }
 
-// Legacy function for backwards compatibility
 fn sparse_matvec_benchmarks(c: &mut Criterion) {
     sequential_benchmarks(c);
     parallel_scaling_benchmarks(c);
@@ -227,10 +249,8 @@ fn create_synthetic_benchmark_parallel(c: &mut Criterion) {
     }
 }
 
-// Separate benchmark groups for individual execution
-criterion_group!(sequential_benches, sequential_benchmarks);
-criterion_group!(parallel_benches, parallel_scaling_benchmarks);
-criterion_group!(all_benches, sparse_matvec_benchmarks);
+criterion_group!(sequential, sequential_benchmarks);
+criterion_group!(parallel, parallel_scaling_benchmarks);
 
-// Default runs all benchmarks for backwards compatibility
-criterion_main!(all_benches);
+criterion_group!(all, parallel_scaling_benchmarks, sequential_benchmarks);
+criterion_main!(all);

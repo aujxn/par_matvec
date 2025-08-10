@@ -23,3 +23,17 @@ cat BENCHMARK_RESULTS.md
 ```
 
 See `BENCHMARKS.md` and `CORRECTNESS_TESTS.md` for detailed usage instructions.
+
+## Analysis
+
+See `BENCHMARKS_RESULTS.md` for table summary of the benchmarks. 
+
+### Sequential
+
+`sprs` and `faer` seem about the same with `nalgebra` generally taking 1.5 times longer for each matrix SpMV. 
+
+### Parallel
+
+Current implementation is bad. Matrices have to be very large to overcome the parallelism overhead.
+For PDE discretization problems where the matrices are very structured scaling is awful; sometimes degrading timings with more threads. 
+Scaling is slightly better on synthetic matrices with no structure and higher densities.

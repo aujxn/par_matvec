@@ -205,15 +205,10 @@ def generate_sequential_table(results: List[BenchmarkResult]) -> str:
         for impl in ['faer', 'nalgebra', 'sprs']:
             if impl in implementations:
                 result = implementations[impl]
-                time_val, unit = format_time_with_unit(result.median_ns)
-                std_val, _ = format_time_with_unit(result.std_dev_ns)
+                time_val, t_unit = format_time_with_unit(result.median_ns)
+                std_val, std_unit = format_time_with_unit(result.std_dev_ns)
                 
-                if unit == 'ns':
-                    cell = f"{time_val:.1f} ± {std_val:.1f} ns"
-                elif unit == 'µs':
-                    cell = f"{time_val:.2f} ± {std_val:.2f} µs"
-                else:  # ms
-                    cell = f"{time_val:.3f} ± {std_val:.3f} ms"
+                cell = f"{time_val:.2f} {t_unit} ± {std_val:.2f} {std_unit}"
                 
                 row.append(cell)
             else:

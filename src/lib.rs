@@ -1,20 +1,21 @@
 use faer::{
-    Accum, ColMut, ColRef, Index, MatMut, MatRef, Par,
+    Accum, ColMut, ColRef, Index, MatMut, MatRef, Par, RowMut, RowRef,
     dyn_stack::{MemStack, StackReq},
     linalg::{temp_mat_scratch, temp_mat_zeroed},
     mat::AsMatMut,
     prelude::Reborrow,
     sparse::{
         SparseColMatRef, SymbolicSparseColMatRef,
-        linalg::matmul::sparse_dense_matmul as seq_sparse_dense,
+        linalg::matmul::{
+            dense_sparse_matmul as seq_dense_sparse, sparse_dense_matmul as seq_sparse_dense,
+        },
     },
     traits::{ComplexField, math_utils::zero},
 };
+use rayon::prelude::*;
 
 pub mod test_utils;
 
-// could probably replace with existing `SparseMatMulInfo` but may be less efficient since cannot
-// store the associated columns (`log(ncols)` extra lookup complexity per thread each matvec)
 pub struct SparseDenseStrategy {
     thread_cols: Vec<usize>,
     thread_indptrs: Vec<usize>,
@@ -26,8 +27,6 @@ impl SparseDenseStrategy {
             Par::Seq => (Vec::new(), Vec::new()),
             Par::Rayon(n_threads) => {
                 let n_threads = n_threads.get();
-                // use this instead?
-                // let n_threads = par.degree();
 
                 let mut thread_cols = Vec::with_capacity(n_threads);
                 let mut thread_indptrs = Vec::with_capacity(n_threads);
@@ -80,9 +79,11 @@ impl SparseDenseStrategy {
 pub fn sparse_dense_scratch<I: Index, T: ComplexField>(
     lhs: SparseColMatRef<'_, I, T>,
     rhs: MatRef<'_, T>,
+    strategy: &SparseDenseStrategy,
     par: Par,
 ) -> StackReq {
     let _ = lhs;
+    let _ = strategy;
     match par {
         Par::Seq => StackReq::empty(),
         Par::Rayon(n_threads) => {
@@ -92,6 +93,33 @@ pub fn sparse_dense_scratch<I: Index, T: ComplexField>(
                 StackReq::empty()
             } else {
                 temp_mat_scratch::<T>(rhs.nrows(), n_threads)
+            }
+        }
+    }
+}
+
+pub fn dense_sparse_scratch<I: Index, T: ComplexField>(
+    lhs: MatRef<'_, T>,
+    rhs: SparseColMatRef<'_, I, T>,
+    strategy: &SparseDenseStrategy,
+    par: Par,
+) -> StackReq {
+    let _ = rhs;
+    match par {
+        Par::Seq => StackReq::empty(),
+        Par::Rayon(n_threads) => {
+            let dim = lhs.nrows();
+            let n_threads = n_threads.get();
+            if dim >= n_threads * 4 {
+                StackReq::empty()
+            } else {
+                let counter = strategy
+                    .thread_cols
+                    .iter()
+                    .zip(strategy.thread_cols.iter().skip(1))
+                    .map(|(start, end)| 1 + end - start)
+                    .sum();
+                StackReq::new::<T>(counter)
             }
         }
     }
@@ -123,15 +151,14 @@ pub fn sparse_dense_matmul<I: Index, T: ComplexField>(
                 unimplemented!();
             } else {
                 for (dst, rhs) in dst.col_iter_mut().zip(rhs.col_iter()) {
-                    par_sparse_matvec(dst, beta, lhs, rhs, &alpha, n_threads, strategy, stack);
+                    par_sparse_dense(dst, beta, lhs, rhs, &alpha, n_threads, strategy, stack);
                 }
             }
         }
     }
 }
 
-//#[cfg(feature = "rayon")]
-fn par_sparse_matvec<I: Index, T: ComplexField>(
+fn par_sparse_dense<I: Index, T: ComplexField>(
     dst: ColMut<'_, T>,
     beta: Accum,
     lhs: SparseColMatRef<'_, I, T>,
@@ -176,8 +203,6 @@ fn par_sparse_matvec<I: Index, T: ComplexField>(
         }
     };
 
-    use rayon::prelude::*;
-
     (0..n_threads).into_par_iter().for_each(|tid| {
         job(tid);
     });
@@ -191,14 +216,15 @@ fn par_sparse_matvec<I: Index, T: ComplexField>(
         rows_per_thread = 1;
     }
 
-    // TODO sum in parallel using chunks might be better
+    // This seems janky could probably improve lots
     dst.as_mat_mut()
         .par_row_chunks_mut(rows_per_thread)
         .zip(work.par_row_chunks(rows_per_thread))
         .for_each(|(dst_chunk, work_chunk)| {
-            for (i, mut dst) in dst_chunk.row_iter_mut().enumerate() {
+            let dst_chunk = dst_chunk.col_mut(0);
+            for (i, dst) in dst_chunk.iter_mut().enumerate() {
                 let work_row = work_chunk.row(i);
-                dst[0] = dst[0].add_by_ref(&work_row.sum());
+                *dst = dst.add_by_ref(&work_row.sum());
             }
         })
     /*
@@ -207,4 +233,126 @@ fn par_sparse_matvec<I: Index, T: ComplexField>(
         *dst = dst.add_by_ref(&work_row.sum());
     }
     */
+}
+
+pub fn dense_sparse_matmul<I: Index, T: ComplexField>(
+    dst: MatMut<'_, T>,
+    beta: Accum,
+    lhs: MatRef<'_, T>,
+    rhs: SparseColMatRef<'_, I, T>,
+    alpha: T,
+    par: Par,
+    strategy: &SparseDenseStrategy,
+    stack: &mut MemStack,
+) {
+    match par {
+        Par::Seq => seq_dense_sparse(dst, beta, lhs, rhs, alpha, par),
+        Par::Rayon(n_threads) => {
+            let dim = lhs.nrows();
+            let n_threads = n_threads.get();
+            if dim >= n_threads * 4 {
+                unimplemented!();
+            } else {
+                for (dst, lhs) in dst.row_iter_mut().zip(lhs.row_iter()) {
+                    par_dense_sparse(dst, beta, lhs, rhs, &alpha, n_threads, strategy, stack);
+                }
+            }
+        }
+    }
+}
+
+fn par_dense_sparse<I: Index, T: ComplexField>(
+    dst: RowMut<'_, T>,
+    beta: Accum,
+    lhs: RowRef<'_, T>,
+    rhs: SparseColMatRef<'_, I, T>,
+    alpha: &T,
+    n_threads: usize,
+    strategy: &SparseDenseStrategy,
+    stack: &mut MemStack,
+) {
+    let global_counter: usize = strategy
+        .thread_cols
+        .iter()
+        .zip(strategy.thread_cols.iter().skip(1))
+        .map(|(start, end)| 1 + end - start)
+        .sum();
+
+    let (mut work, _) = temp_mat_zeroed::<T, _, _>(global_counter, 1, stack);
+    let work = work.as_mat_mut();
+    let work = work.rb();
+    let (rhs_symbolic, rhs_values) = rhs.parts();
+    let row_indices = rhs_symbolic.row_idx();
+    let mut dst = dst;
+
+    let job = &|tid: usize| {
+        assert!(tid < n_threads);
+
+        // find the starting index of this thread's workspace
+        // TODO probably want to just save this info (along with total) in `strategy` because it's
+        // recomputed a lot
+        let counter: usize = strategy
+            .thread_cols
+            .iter()
+            .take(tid)
+            .zip(strategy.thread_cols.iter().skip(1))
+            .map(|(start, end)| 1 + end - start)
+            .sum();
+
+        let col_start = strategy.thread_cols[tid];
+        let col_end = strategy.thread_cols[tid + 1];
+        let idx_start = strategy.thread_indptrs[tid];
+        let idx_end = strategy.thread_indptrs[tid + 1];
+
+        let thread_workspace_size = 1 + col_end - col_start;
+
+        // SAFETY each thread gets its own (non-overlapping) workspace subvector based on row partitions
+        let mut work = unsafe {
+            work.col(0)
+                .const_cast()
+                .try_as_col_major_mut()
+                .unwrap()
+                .subrows_mut(counter, thread_workspace_size)
+        };
+
+        for (work_idx, j) in (col_start..=col_end).enumerate() {
+            let mut col_range = rhs_symbolic.col_range(j);
+            if j == col_start {
+                col_range.start = idx_start;
+            }
+            if j == col_end {
+                col_range.end = idx_end;
+            }
+            for idx in col_range {
+                let k = row_indices[idx].zx();
+                let lhs_k = lhs[k].mul_by_ref(alpha);
+                let rhs_kj = &rhs_values[idx];
+                work[work_idx] = work[work_idx].add_by_ref(&lhs_k.mul_by_ref(&rhs_kj));
+            }
+        }
+    };
+
+    (0..n_threads).into_par_iter().for_each(|tid| {
+        job(tid);
+    });
+
+    if let Accum::Replace = beta {
+        dst.fill(zero());
+    }
+
+    let work = work.col(0);
+    let mut global_idx = 0;
+    for (col_start, col_end) in strategy
+        .thread_cols
+        .iter()
+        .zip(strategy.thread_cols.iter().skip(1))
+    {
+        let workspace_size = 1 + col_end - col_start;
+        for offset in 0..workspace_size {
+            let dst_col = col_start + offset;
+            let work_idx = global_idx + offset;
+            dst[dst_col] = dst[dst_col].add_by_ref(&work[work_idx]);
+        }
+        global_idx += workspace_size;
+    }
 }

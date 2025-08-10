@@ -9,6 +9,7 @@ use nalgebra_sparse::{CooMatrix, CsrMatrix};
 use sprs::{CsMatBase, TriMat};
 
 /// Small matrices (< 1M nnz) for correctness tests and sequential benchmarks
+/// (2d FEM using continuous linear elements for laplacian problem)
 pub const SMALL_MATRICES: &[&str] = &[
     "test_matrices/0.mtx", // 18x18, 68 nnz
     "test_matrices/1.mtx", // 51x51, 215 nnz
@@ -19,12 +20,10 @@ pub const SMALL_MATRICES: &[&str] = &[
 ];
 
 /// Large matrices (>= 1M nnz) for parallel scaling benchmarks
+/// (2d and 3d FEM using continuous linear elements for laplacian problem)
 pub const LARGE_MATRICES: &[&str] = &[
     "test_matrices/anisotropy_3d_1r.mtx", // 84k x 84k, 1.4M nnz
     "test_matrices/anisotropy_3d_2r.mtx", // 650k x 650k, 11M nnz
-    "test_matrices/anisotropy_3d_3r.mtx", // 5.1M x 5.1M, 87M nnz
-    "test_matrices/anisotropy_3d_4r.mtx", // 194k x 194k, 2.8M nnz
-    "test_matrices/anisotropy_3d_5r.mtx", // 1.5M x 1.5M, 22M nnz
     "test_matrices/anisotropy_2d.mtx",    // 1.3M x 1.3M, 12M nnz
     "test_matrices/spe10_0.mtx",          // 1.2M x 1.2M, 31M nnz
 ];
@@ -260,4 +259,3 @@ impl SimpleMatrixLoader {
         }
     }
 }
-

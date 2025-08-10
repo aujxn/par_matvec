@@ -3,14 +3,14 @@ use std::num::NonZero;
 use faer::{Mat, Par};
 use nalgebra::DVector;
 
-use par_matvec::{SparseDenseStrategy, sparse_dense_matmul, sparse_dense_scratch};
-use par_matvec::test_utils::{TestMatrices, SMALL_MATRICES};
+use par_matvec::test_utils::{SMALL_MATRICES, TestMatrices};
+use par_matvec::{
+    SparseDenseStrategy, dense_sparse_matmul, sparse_dense_matmul, sparse_dense_scratch,
+};
 
 /// Tolerance for floating point comparisons
 const RELATIVE_TOLERANCE: f64 = 1e-10;
 const ABSOLUTE_TOLERANCE: f64 = 1e-12;
-
-// TestMatrices struct and implementation moved to test_utils module
 
 /// Convert different vector types to a common Vec<f64> for comparison
 trait ToVecF64 {
@@ -79,7 +79,6 @@ fn test_sequential_implementations(
         matrices.matrix_name, matrices.nrows, matrices.ncols, matrices.nnz
     );
 
-    // Compute reference result using faer built-in sequential
     let mut faer_builtin_output = Mat::zeros(matrices.nrows, 1);
     faer::sparse::linalg::matmul::sparse_dense_matmul(
         faer_builtin_output.as_mut(),
@@ -90,7 +89,6 @@ fn test_sequential_implementations(
         Par::Seq,
     );
 
-    // Test nalgebra-sparse
     let nalgebra_rhs = DVector::from_iterator(
         matrices.rhs_vector.nrows(),
         matrices.rhs_vector.col(0).iter().copied(),
@@ -108,7 +106,6 @@ fn test_sequential_implementations(
     );
     println!("  ✓ nalgebra-sparse matches reference");
 
-    // Test sprs
     let sprs_rhs: Vec<f64> = matrices.rhs_vector.col(0).iter().copied().collect();
     let mut sprs_output = vec![0.0; matrices.nrows];
     sprs::prod::mul_acc_mat_vec_csr(
@@ -140,10 +137,9 @@ fn test_parallel_implementations(
         matrices.matrix_name, matrices.nrows, matrices.ncols, matrices.nnz
     );
 
-    // Compute reference result using faer built-in sequential
-    let mut reference_output = Mat::zeros(matrices.nrows, 1);
+    let mut sparse_dense_reference_output = Mat::zeros(matrices.nrows, 1);
     faer::sparse::linalg::matmul::sparse_dense_matmul(
-        reference_output.as_mut(),
+        sparse_dense_reference_output.as_mut(),
         faer::Accum::Replace,
         matrices.faer_csc.as_ref(),
         matrices.rhs_vector.as_ref(),
@@ -151,9 +147,24 @@ fn test_parallel_implementations(
         Par::Seq,
     );
 
-    // Test different thread counts
-    let thread_counts = [2, 4, 8, 16];
-    //let thread_counts = [1, 2, 4, 8];
+    let mut dense_sparse_reference_output = Mat::zeros(1, matrices.ncols);
+    let lhs_vector = matrices.rhs_vector.transpose();
+    faer::sparse::linalg::matmul::dense_sparse_matmul(
+        dense_sparse_reference_output.as_mut(),
+        faer::Accum::Replace,
+        lhs_vector.as_ref(),
+        matrices.faer_csc.as_ref(),
+        1.0,
+        Par::Seq,
+    );
+
+    let cpus = num_cpus::get();
+    let mut thread_counts = Vec::new();
+    let mut n_threads = 2;
+    while n_threads <= cpus {
+        thread_counts.push(n_threads);
+        n_threads *= 2;
+    }
 
     for &num_threads in &thread_counts {
         if let Some(n_threads) = NonZero::new(num_threads) {
@@ -169,6 +180,7 @@ fn test_parallel_implementations(
             let stack_req = sparse_dense_scratch(
                 matrices.faer_csc.as_ref(),
                 matrices.rhs_vector.as_ref(),
+                &strategy,
                 par,
             );
             let mut stack_buffer = faer::dyn_stack::MemBuffer::try_new(stack_req)?;
@@ -187,14 +199,40 @@ fn test_parallel_implementations(
 
             assert!(
                 vectors_are_equal(
-                    &reference_output,
+                    &sparse_dense_reference_output,
                     &parallel_output,
                     RELATIVE_TOLERANCE,
                     ABSOLUTE_TOLERANCE
                 ),
-                "Parallel implementation with {} threads differs from reference",
+                "Parallel sparse-dense implementation with {} threads differs from reference",
                 num_threads
             );
+
+            let mut parallel_output = Mat::zeros(1, matrices.nrows);
+            dense_sparse_matmul(
+                parallel_output.as_mut(),
+                faer::Accum::Replace,
+                lhs_vector,
+                matrices.faer_csc.as_ref(),
+                1.0,
+                par,
+                &strategy,
+                &mut stack,
+            );
+
+            assert!(
+                vectors_are_equal(
+                    &dense_sparse_reference_output,
+                    &parallel_output,
+                    RELATIVE_TOLERANCE,
+                    ABSOLUTE_TOLERANCE
+                ),
+                "Parallel dense-sparse implementation with {} threads differs from reference\n{:?}\n{:?}",
+                num_threads,
+                dense_sparse_reference_output,
+                parallel_output
+            );
+
             println!(
                 "  ✓ Custom parallel with {} threads matches reference",
                 num_threads
@@ -229,7 +267,7 @@ fn test_synthetic_matrices() {
 
 #[test]
 fn test_matrix_market_files() {
-    let matrix_files = &SMALL_MATRICES[0..4]; // Use first 4 small matrices for tests
+    let matrix_files = &SMALL_MATRICES[0..4];
 
     for matrix_file in matrix_files {
         if std::path::Path::new(matrix_file).exists() {
@@ -264,19 +302,16 @@ fn test_matrix_market_files() {
 
 #[test]
 fn test_edge_cases() {
-    // Test diagonal matrix
-    println!("\nTesting diagonal matrix");
-    let diagonal_matrices = TestMatrices::create_synthetic(20, 20, 1.0); // Very dense creates a diagonal-like matrix
+    println!("\nTesting dense matrix");
+    let dense_matrices = TestMatrices::create_synthetic(20, 20, 1.0);
 
-    test_sequential_implementations(&diagonal_matrices)
-        .expect("Sequential tests failed on diagonal matrix");
-    test_parallel_implementations(&diagonal_matrices)
-        .expect("Parallel tests failed on diagonal matrix");
+    test_sequential_implementations(&dense_matrices)
+        .expect("Sequential tests failed on dense matrix");
+    test_parallel_implementations(&dense_matrices).expect("Parallel tests failed on dense matrix");
 
     println!("Edge case tests passed!");
 }
 
-// Helper function to run correctness tests on all your test matrices
 fn run_all_matrix_tests() -> Result<(), Box<dyn std::error::Error>> {
     let matrix_files = SMALL_MATRICES;
 
@@ -313,9 +348,8 @@ fn run_all_matrix_tests() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-#[ignore] // Use `cargo test test_all_matrices -- --ignored` to run this comprehensive test
+#[ignore]
 fn test_all_matrices() {
     run_all_matrix_tests().expect("Comprehensive matrix tests failed");
     println!("🎉 All comprehensive matrix tests passed!");
 }
-
