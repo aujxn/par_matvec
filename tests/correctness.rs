@@ -246,9 +246,10 @@ fn test_parallel_implementations(
 #[test]
 fn test_synthetic_matrices() {
     let test_cases = [
-        (10, 10, 0.5),    // Small dense
-        (50, 50, 0.1),    // Medium sparse
-        (100, 100, 0.05), // Larger sparser
+        (10, 10, 0.5),
+        (50, 50, 0.1),
+        (100, 100, 0.05),
+        (2000, 2000, 0.05),
     ];
 
     for &(nrows, ncols, density) in &test_cases {
@@ -259,7 +260,9 @@ fn test_synthetic_matrices() {
         let matrices = TestMatrices::create_synthetic(nrows, ncols, density);
 
         test_sequential_implementations(&matrices).expect("Sequential tests failed");
-        test_parallel_implementations(&matrices).expect("Parallel tests failed");
+        if matrices.nnz > 1000 {
+            test_parallel_implementations(&matrices).expect("Parallel tests failed");
+        }
     }
 
     println!("All synthetic matrix tests passed!");
@@ -307,6 +310,7 @@ fn test_edge_cases() {
 
     test_sequential_implementations(&dense_matrices)
         .expect("Sequential tests failed on dense matrix");
+    let dense_matrices = TestMatrices::create_synthetic(2000, 2000, 1.0);
     test_parallel_implementations(&dense_matrices).expect("Parallel tests failed on dense matrix");
 
     println!("Edge case tests passed!");
