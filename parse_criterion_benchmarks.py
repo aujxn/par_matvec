@@ -218,10 +218,10 @@ def generate_sequential_table(results: List[BenchmarkResult]) -> str:
     
     return "\n".join(lines)
 
-def generate_thread_scaling_table(results: List[BenchmarkResult]) -> str:
-    """Generate thread scaling performance table."""
-    # Filter parallel results
-    parallel_results = [r for r in results if r.group_id.startswith("thread_scaling_") and r.threads is not None]
+def generate_thread_scaling_table(results: List[BenchmarkResult], function_name: str, table_title: str) -> str:
+    """Generate thread scaling performance table for a specific function."""
+    # Filter parallel results for the specific function
+    parallel_results = [r for r in results if r.group_id.startswith("thread_scaling_") and r.threads is not None and r.function_id == function_name]
     
     # Group by matrix name, then by thread count
     matrix_groups = {}
@@ -238,7 +238,7 @@ def generate_thread_scaling_table(results: List[BenchmarkResult]) -> str:
     sorted_threads = sorted(thread_counts)
     
     lines = []
-    lines.append("\n# Parallel Thread Scaling Results\n")
+    lines.append(f"\n# {table_title}\n")
     
     # Header
     header = ["| Matrix | Dimensions | Non-zeros |"] + [f" {t} Thread{'s' if t > 1 else ''} |" for t in sorted_threads]
@@ -348,6 +348,8 @@ def generate_notes_section() -> str:
     lines.append("- `faer` = faer built-in sequential sparse-dense matrix-vector multiplication")
     lines.append("- `nalgebra` = nalgebra-sparse CSR matrix-vector multiplication")
     lines.append("- `sprs` = sprs CSR matrix-vector multiplication")
+    lines.append("- `sparse_dense` = parallel sparse-dense matrix-vector multiplication implementation")
+    lines.append("- `dense_sparse` = parallel dense-sparse matrix-vector multiplication implementation")
     lines.append("- Thread scaling shows parallel implementation performance across different thread counts")
     lines.append("- All measurements taken on the same system with consistent methodology")
     
@@ -367,14 +369,16 @@ def main():
     
     # Generate sections
     sequential_table = generate_sequential_table(results)
-    thread_scaling_table = generate_thread_scaling_table(results)
+    sparse_dense_table = generate_thread_scaling_table(results, "sparse_dense", "Parallel Thread Scaling Results - Sparse-Dense Multiplication")
+    dense_sparse_table = generate_thread_scaling_table(results, "dense_sparse", "Parallel Thread Scaling Results - Dense-Sparse Multiplication")
     performance_analysis = generate_performance_analysis(results)
     notes_section = generate_notes_section()
     
     # Combine all sections
     full_content = "\n".join([
         sequential_table,
-        thread_scaling_table,
+        sparse_dense_table,
+        dense_sparse_table,
         performance_analysis,
         notes_section
     ])

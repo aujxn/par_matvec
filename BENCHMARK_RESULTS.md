@@ -10,7 +10,27 @@
 | **4** | 2193x2193 | 10,673 | 8.26 µs ± 12.80 ns | 11.47 µs ± 8.31 ns | 8.46 µs ± 7.10 ns |
 | **5** | 8481x8481 | 41,825 | 31.99 µs ± 51.19 ns | 42.89 µs ± 56.39 ns | 31.19 µs ± 19.98 ns |
 
-# Parallel Thread Scaling Results
+# Parallel Thread Scaling Results - Sparse-Dense Multiplication
+
+| Matrix | Dimensions | Non-zeros | 1 Thread | 2 Threads | 4 Threads | 8 Threads |
+|--------|------------|-----------|-----------:|-----------:|-----------:|-----------:|
+| **0** | 18x18 | 68 | 67.4 ns | 22.82 µs | 25.90 µs | 25.33 µs |
+| **synthetic_100x100** | 100x100 | 100 | 186.0 ns | 25.10 µs | 27.84 µs | 27.12 µs |
+| **1** | 51x51 | 215 | 200.7 ns | 25.01 µs | 27.36 µs | 26.19 µs |
+| **2** | 165x165 | 749 | 597.0 ns | 26.62 µs | 31.96 µs | 27.51 µs |
+| **3** | 585x585 | 2,777 | 2.23 µs | 32.24 µs | 33.49 µs | 29.22 µs |
+| **synthetic_1000x1000** | 1000x1000 | 10,000 | 7.10 µs | 43.39 µs | 45.32 µs | 39.05 µs |
+| **4** | 2193x2193 | 10,673 | 8.98 µs | 48.22 µs | 51.52 µs | 48.27 µs |
+| **synthetic_2000x2000** | 2000x2000 | 40,000 | 26.16 µs | 60.04 µs | 56.83 µs | 56.79 µs |
+| **5** | 8481x8481 | 41,825 | 36.22 µs | 79.50 µs | 96.95 µs | 103.25 µs |
+| **synthetic_10000x10000** | 10000x10000 | 1,000,000 | 1.120 ms | 686.78 µs | 492.84 µs | 394.65 µs |
+| **anisotropy_3d_1r** | 84315x84315 | 1,394,367 | 1.068 ms | 1.025 ms | 732.32 µs | 756.57 µs |
+| **synthetic_20000x20000** | 20000x20000 | 4,000,000 | 4.760 ms | 2.737 ms | 2.119 ms | 1.564 ms |
+| **anisotropy_3d_2r** | 650621x650621 | 10,978,101 | 10.062 ms | 8.192 ms | 7.871 ms | 9.386 ms |
+| **anisotropy_2d** | 1313281x1313281 | 11,804,161 | 12.227 ms | 11.399 ms | 10.886 ms | 14.382 ms |
+| **spe10_0** | 1159366x1159366 | 30,628,096 | 24.564 ms | 19.990 ms | 15.832 ms | 18.444 ms |
+
+# Parallel Thread Scaling Results - Dense-Sparse Multiplication
 
 | Matrix | Dimensions | Non-zeros | 1 Thread | 2 Threads | 4 Threads | 8 Threads |
 |--------|------------|-----------|-----------:|-----------:|-----------:|-----------:|
@@ -53,5 +73,7 @@
 - `faer` = faer built-in sequential sparse-dense matrix-vector multiplication
 - `nalgebra` = nalgebra-sparse CSR matrix-vector multiplication
 - `sprs` = sprs CSR matrix-vector multiplication
+- `sparse_dense` = parallel sparse-dense matrix-vector multiplication implementation
+- `dense_sparse` = parallel dense-sparse matrix-vector multiplication implementation
 - Thread scaling shows parallel implementation performance across different thread counts
 - All measurements taken on the same system with consistent methodology

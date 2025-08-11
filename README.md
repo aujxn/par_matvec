@@ -10,9 +10,9 @@ This crate focuses on evaluating the performance of different sparse matrix by d
 
 ```bash
 # Run benchmarks
-cargo bench --bench sparse_matvec
+cargo bench
 
-# Run correctness tests
+# Run tests
 cargo test
 
 # Generate results tables
@@ -22,7 +22,7 @@ python3 parse_criterion_benchmarks.py
 cat BENCHMARK_RESULTS.md
 ```
 
-See `BENCHMARKS.md` and `CORRECTNESS_TESTS.md` for detailed usage instructions.
+See `BENCHMARKS.md` and `CORRECTNESS_TESTS.md` for more details.
 
 ## Analysis
 
