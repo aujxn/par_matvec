@@ -11,6 +11,7 @@ nalgebra-sparse = { version = "0.11.0", features = ["io"] }
 ndarray = "0.16.1"
 num_cpus = "1.17.0"
 rayon = "1.10.0"
+spin = "0.10.0"
 sprs = "0.11.3"
 
 [dev-dependencies]

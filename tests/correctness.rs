@@ -9,8 +9,8 @@ use par_matvec::{
 };
 
 /// Tolerance for floating point comparisons
-const RELATIVE_TOLERANCE: f64 = 1e-10;
-const ABSOLUTE_TOLERANCE: f64 = 1e-12;
+const RELATIVE_TOLERANCE: f64 = 1e-12;
+const ABSOLUTE_TOLERANCE: f64 = 1e-8;
 
 /// Convert different vector types to a common Vec<f64> for comparison
 trait ToVecF64 {
@@ -54,7 +54,7 @@ fn vectors_are_equal<T1: ToVecF64, T2: ToVecF64>(
         let diff = (a_val - b_val).abs();
         let max_val = a_val.abs().max(b_val.abs());
 
-        if diff > absolute_tol && diff > relative_tol * max_val {
+        if diff > absolute_tol || diff > relative_tol * max_val {
             eprintln!(
                 "Vectors differ at index {}: {} vs {}, diff: {}, relative: {}",
                 i,

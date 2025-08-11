@@ -1,3 +1,5 @@
+use std::{sync::Arc, thread};
+
 use faer::{
     Accum, ColMut, ColRef, Index, MatMut, MatRef, Par, RowMut, RowRef,
     dyn_stack::{MemStack, StackReq},
@@ -12,7 +14,6 @@ use faer::{
     },
     traits::{ComplexField, math_utils::zero},
 };
-use rayon::prelude::*;
 
 pub mod test_utils;
 
@@ -169,48 +170,66 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
     stack: &mut MemStack,
 ) {
     let m = lhs.nrows();
+
     let (mut work, _) = temp_mat_zeroed::<T, _, _>(m, n_threads, stack);
     let work = work.as_mat_mut();
     let work = work.rb();
     let (lhs_symbolic, lhs_values) = lhs.parts();
     let row_indices = lhs_symbolic.row_idx();
-    let mut dst = dst;
 
-    let job = &|tid: usize| {
-        assert!(tid < n_threads);
+    let arc_dst = Arc::new(spin::Mutex::new(dst));
 
-        // SAFETY each thread gets its own workspace vector to be summed when all complete
-        let mut work = unsafe { work.col(tid).const_cast().try_as_col_major_mut().unwrap() };
-        let col_start = strategy.thread_cols[tid];
-        let col_end = strategy.thread_cols[tid + 1];
-        let idx_start = strategy.thread_indptrs[tid];
-        let idx_end = strategy.thread_indptrs[tid + 1];
+    thread::scope(|s| {
+        // lock the mutex so spawning thread doesn't wipe any finished values...
+        let mut dst = arc_dst.lock();
 
-        for depth in col_start..=col_end {
-            let rhs_k = rhs[depth].mul_by_ref(alpha);
-            let mut col_range = lhs_symbolic.col_range(depth);
-            if depth == col_start {
-                col_range.start = idx_start;
-            }
-            if depth == col_end {
-                col_range.end = idx_end;
-            }
-            for idx in col_range {
-                let i = row_indices[idx].zx();
-                let lhs_ik = &lhs_values[idx];
-                work[i] = work[i].add_by_ref(&lhs_ik.mul_by_ref(&rhs_k));
-            }
+        for tid in 0..n_threads {
+            let arc_dst = arc_dst.clone();
+            let _handle = s.spawn(move || {
+                // SAFETY each thread gets its own workspace vector to be summed when all complete
+                let mut work =
+                    unsafe { work.col(tid).const_cast().try_as_col_major_mut().unwrap() };
+
+                let col_start = strategy.thread_cols[tid];
+                let col_end = strategy.thread_cols[tid + 1];
+                let idx_start = strategy.thread_indptrs[tid];
+                let idx_end = strategy.thread_indptrs[tid + 1];
+
+                for depth in col_start..=col_end {
+                    let rhs_k = rhs[depth].mul_by_ref(alpha);
+                    let mut col_range = lhs_symbolic.col_range(depth);
+                    if depth == col_start {
+                        col_range.start = idx_start;
+                    }
+                    if depth == col_end {
+                        col_range.end = idx_end;
+                    }
+                    for idx in col_range {
+                        let i = row_indices[idx].zx();
+                        let lhs_ik = &lhs_values[idx];
+                        work[i] = work[i].add_by_ref(&lhs_ik.mul_by_ref(&rhs_k));
+                    }
+                }
+
+                let mut dst = arc_dst.lock();
+                for (i, src) in work.iter().enumerate() {
+                    dst[i] = dst[i].add_by_ref(src);
+                }
+            });
         }
-    };
 
+        if let Accum::Replace = beta {
+            dst.fill(zero());
+        }
+    });
+
+    /*
     (0..n_threads).into_par_iter().for_each(|tid| {
         job(tid);
     });
+    */
 
-    if let Accum::Replace = beta {
-        dst.fill(zero());
-    }
-
+    /*
     let mut rows_per_thread = work.nrows() / n_threads;
     if rows_per_thread == 0 {
         rows_per_thread = 1;
@@ -227,6 +246,7 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                 *dst = dst.add_by_ref(&work_row.sum());
             }
         })
+    */
     /*
     for (i, dst) in dst.iter_mut().enumerate() {
         let work_row = work.row(i);
@@ -283,63 +303,91 @@ fn par_dense_sparse<I: Index, T: ComplexField>(
     let work = work.rb();
     let (rhs_symbolic, rhs_values) = rhs.parts();
     let row_indices = rhs_symbolic.row_idx();
-    let mut dst = dst;
 
-    let job = &|tid: usize| {
-        assert!(tid < n_threads);
+    let arc_dst = Arc::new(spin::Mutex::new(dst));
 
-        // find the starting index of this thread's workspace
-        // TODO probably want to just save this info (along with total) in `strategy` because it's
-        // recomputed a lot
-        let counter: usize = strategy
-            .thread_cols
-            .iter()
-            .take(tid)
-            .zip(strategy.thread_cols.iter().skip(1))
-            .map(|(start, end)| 1 + end - start)
-            .sum();
+    thread::scope(|s| {
+        // lock the mutex so spawning thread doesn't wipe any finished values...
+        let mut dst = arc_dst.lock();
+        //let (tx, rx) = sync_channel(n_threads);
+        for tid in 0..n_threads {
+            let arc_dst = arc_dst.clone();
+            //let tx = tx.clone();
+            let _handle = s.spawn(move || {
+                // find the starting index of this thread's workspace
+                // TODO probably want to just save this info (along with total) in `strategy` because it's
+                // recomputed a lot
+                let counter: usize = strategy
+                    .thread_cols
+                    .iter()
+                    .take(tid)
+                    .zip(strategy.thread_cols.iter().skip(1))
+                    .map(|(start, end)| 1 + end - start)
+                    .sum();
 
-        let col_start = strategy.thread_cols[tid];
-        let col_end = strategy.thread_cols[tid + 1];
-        let idx_start = strategy.thread_indptrs[tid];
-        let idx_end = strategy.thread_indptrs[tid + 1];
+                let col_start = strategy.thread_cols[tid];
+                let col_end = strategy.thread_cols[tid + 1];
+                let idx_start = strategy.thread_indptrs[tid];
+                let idx_end = strategy.thread_indptrs[tid + 1];
 
-        let thread_workspace_size = 1 + col_end - col_start;
+                let thread_workspace_size = 1 + col_end - col_start;
 
-        // SAFETY each thread gets its own (non-overlapping) workspace subvector based on row partitions
-        let mut work = unsafe {
-            work.col(0)
-                .const_cast()
-                .try_as_col_major_mut()
-                .unwrap()
-                .subrows_mut(counter, thread_workspace_size)
-        };
+                // SAFETY each thread gets its own (non-overlapping) workspace subvector based on row partitions
+                let mut work = unsafe {
+                    work.col(0)
+                        .const_cast()
+                        .try_as_col_major_mut()
+                        .unwrap()
+                        .subrows_mut(counter, thread_workspace_size)
+                };
 
-        for (work_idx, j) in (col_start..=col_end).enumerate() {
-            let mut col_range = rhs_symbolic.col_range(j);
-            if j == col_start {
-                col_range.start = idx_start;
+                for (work_idx, j) in (col_start..=col_end).enumerate() {
+                    let mut col_range = rhs_symbolic.col_range(j);
+                    if j == col_start {
+                        col_range.start = idx_start;
+                    }
+                    if j == col_end {
+                        col_range.end = idx_end;
+                    }
+                    for idx in col_range {
+                        let k = row_indices[idx].zx();
+                        let lhs_k = lhs[k].mul_by_ref(alpha);
+                        let rhs_kj = &rhs_values[idx];
+                        work[work_idx] = work[work_idx].add_by_ref(&lhs_k.mul_by_ref(&rhs_kj));
+                    }
+                }
+                //tx.send((counter, thread_workspace_size, col_start)).unwrap();
+
+                let mut dst = arc_dst.lock();
+                for (offset, val) in work.iter().enumerate() {
+                    let dst_col = col_start + offset;
+                    dst[dst_col] = dst[dst_col].add_by_ref(val);
+                }
+            });
+        }
+
+        if let Accum::Replace = beta {
+            dst.fill(zero());
+        }
+
+        /*
+        let work = work.col(0);
+        let mut finished_counter = 0;
+        for (ws_start, ws_size, col_start) in rx.iter() {
+            for offset in 0..ws_size {
+                let dst_col = col_start + offset;
+                let work_idx = ws_start + offset;
+                dst[dst_col] = dst[dst_col].add_by_ref(&work[work_idx]);
             }
-            if j == col_end {
-                col_range.end = idx_end;
-            }
-            for idx in col_range {
-                let k = row_indices[idx].zx();
-                let lhs_k = lhs[k].mul_by_ref(alpha);
-                let rhs_kj = &rhs_values[idx];
-                work[work_idx] = work[work_idx].add_by_ref(&lhs_k.mul_by_ref(&rhs_kj));
+            finished_counter += 1;
+            if finished_counter == n_threads {
+                break;
             }
         }
-    };
-
-    (0..n_threads).into_par_iter().for_each(|tid| {
-        job(tid);
+        */
     });
 
-    if let Accum::Replace = beta {
-        dst.fill(zero());
-    }
-
+    /*
     let work = work.col(0);
     let mut global_idx = 0;
     for (col_start, col_end) in strategy
@@ -355,4 +403,5 @@ fn par_dense_sparse<I: Index, T: ComplexField>(
         }
         global_idx += workspace_size;
     }
+    */
 }
