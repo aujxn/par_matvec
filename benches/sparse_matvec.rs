@@ -84,7 +84,7 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
 
     let cpus = num_cpus::get();
     let mut thread_counts = Vec::new();
-    let mut n_threads = 1;
+    let mut n_threads = 8;
     while n_threads <= cpus {
         thread_counts.push(n_threads);
         n_threads *= 2;
@@ -131,6 +131,7 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
                     })
                 },
             );
+            break;
 
             /*
             let mut output = Mat::zeros(lhs_rows, loader.ncols);

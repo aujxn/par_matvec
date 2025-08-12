@@ -1,3 +1,5 @@
 /target
 CLAUDE.md
 /test_matrices
+perf*
+flamegraph.svg

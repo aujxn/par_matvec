@@ -2,7 +2,8 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_queue::ArrayQueue;
 use faer::dyn_stack::DynArray;
 use std::cmp::{max, min};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 use std::{sync::Arc, thread};
 
 use faer::{
@@ -22,8 +23,12 @@ use faer::{
 
 pub mod test_utils;
 
-const B_ROWS: usize = 32 * 1024; // 32k rows ~ 256KB of y at f64
-const K_CAP: usize = 2048; // ~24KB chunk payload
+//const B_ROWS: usize = 32 * 1024; // 32k rows ~ 256KB of y at f64
+//const K_CAP: usize = 2048; // ~24KB chunk payload
+const B_ROWS: usize = 16 * 1024;
+const K_CAP: usize = 1024;
+const WS_CHUNKS_PER_THREAD: usize = 200; // how many chunks to put in the chunk pool
+const CHUNK_BLOCK: usize = 5; // how many chunks to buffer in communication
 
 pub struct SparseDenseStrategy {
     thread_cols: Vec<usize>,
@@ -102,7 +107,7 @@ pub fn sparse_dense_scratch<I: Index, T: ComplexField>(
                 StackReq::empty()
             } else {
                 //temp_mat_scratch::<T>(rhs.nrows(), n_threads)
-                StackReq::new::<(usize, T)>(K_CAP * n_threads * 1000)
+                StackReq::new::<(usize, T)>(K_CAP * n_threads * WS_CHUNKS_PER_THREAD)
             }
         }
     }
@@ -161,64 +166,24 @@ pub fn sparse_dense_matmul<I: Index, T: ComplexField>(
                 unimplemented!();
             } else {
                 for (dst, rhs) in dst.col_iter_mut().zip(rhs.col_iter()) {
-                    par_sparse_dense(dst, beta, lhs, rhs, &alpha, n_threads, strategy, stack);
+                    let mut dst = dst;
+                    for _ in 0..3000 {
+                        par_sparse_dense(
+                            dst.rb_mut(),
+                            beta,
+                            lhs,
+                            rhs,
+                            &alpha,
+                            n_threads,
+                            strategy,
+                            stack,
+                        );
+                    }
                 }
             }
         }
     }
 }
-
-/*
-struct MergeBuffer<T: ComplexField> {
-    pub old_buffer: Vec<(usize, T)>,
-    pub work_buffer: Vec<(usize, T)>,
-    pub i: usize,
-}
-
-impl<T: ComplexField> MergeBuffer<T> {
-    // TODO: figure out how to construct from MemStack
-    fn new(capacity: usize) -> Self {
-        Self {
-            old_buffer: Vec::with_capacity(capacity),
-            work_buffer: Vec::with_capacity(capacity),
-            i: 0,
-        }
-    }
-
-    //#[inline]
-    fn push(&mut self, idx: usize, val: T) {
-        // Move elements from old_buffer into work_buffer while they're smaller than idx
-        while self.i < self.old_buffer.len() && self.old_buffer[self.i].0 < idx {
-            self.work_buffer.push(self.old_buffer[self.i].clone());
-            self.i += 1;
-        }
-
-        // Handle the case where old_buffer has the same index
-        if self.i < self.old_buffer.len() && self.old_buffer[self.i].0 == idx {
-            let combined_val = self.old_buffer[self.i].1.add_by_ref(&val);
-            self.work_buffer.push((idx, combined_val));
-            self.i += 1;
-        } else {
-            // Just add the current element (no duplicates possible)
-            self.work_buffer.push((idx, val));
-        }
-    }
-
-    //#[inline]
-    fn reset(&mut self) {
-        // Finish moving any remaining elements from old_buffer
-        while self.i < self.old_buffer.len() {
-            self.work_buffer.push(self.old_buffer[self.i].clone());
-            self.i += 1;
-        }
-
-        // Swap buffers and reset index
-        std::mem::swap(&mut self.old_buffer, &mut self.work_buffer);
-        self.work_buffer.clear();
-        self.i = 0;
-    }
-}
-*/
 
 /// A spill chunk. We batch contributions targeting a single row-block.
 #[derive(Debug)]
@@ -247,6 +212,7 @@ impl<'a, T: ComplexField> Chunk<'a, T> {
     fn len(&self) -> usize {
         self.len
     }
+    #[inline]
     fn clear_reuse(&mut self, new_block: usize) {
         self.block_id = new_block;
         self.len = 0;
@@ -347,8 +313,11 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
     let (owner_of_block, row_ranges) = assign_blocks(m, B_ROWS, n_threads);
     let n_blocks = (m + B_ROWS - 1) / B_ROWS;
 
-    let (mut array, _) = stack.make_with(K_CAP * n_threads * 1000, |_| (0usize, T::zero_impl()));
-    let chunk_queue = Arc::new(ArrayQueue::new(n_threads * 1000));
+    let (mut array, _) = stack.make_with(K_CAP * n_threads * WS_CHUNKS_PER_THREAD, |_| {
+        (0usize, T::zero_impl())
+    });
+    // TODO: add chunks in block
+    let chunk_queue = Arc::new(ArrayQueue::new(n_threads * WS_CHUNKS_PER_THREAD));
     for storage in array.chunks_exact_mut(K_CAP) {
         let chunk = Chunk::new(0, storage);
         chunk_queue
@@ -357,21 +326,29 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
     }
 
     // Per-owner inbox: MPSC of spill chunks
-    let mut txs: Vec<Sender<Vec<Box<Chunk<T>>>>> = Vec::with_capacity(n_threads);
-    let mut rxs: Vec<Receiver<Vec<Box<Chunk<T>>>>> = Vec::with_capacity(n_threads);
+    ////let mut txs: Vec<Sender<Vec<Box<Chunk<T>>>>> = Vec::with_capacity(n_threads);
+    //let mut rxs: VecDeque<Receiver<Vec<Box<Chunk<T>>>>> = Vec::with_capacity(n_threads);
+    let mut txs = Vec::with_capacity(n_threads);
+    let mut rxs = VecDeque::with_capacity(n_threads);
     for _ in 0..n_threads {
         let (tx, rx) = unbounded::<Vec<Box<Chunk<T>>>>();
+        //let (tx, rx) = channel::<Vec<Box<Chunk<T>>>>();
         txs.push(tx);
-        rxs.push(rx);
+        rxs.push_back(rx);
     }
 
     let (lhs_symbolic, lhs_values) = lhs.parts();
     let row_indices = lhs_symbolic.row_idx();
 
     thread::scope(|s| {
-        for tid in 0..n_threads {
+        let mut handles = Vec::with_capacity(n_threads);
+        //let start_time = Instant::now();
+        let core_ids = core_affinity::get_core_ids().unwrap();
+        debug_assert!(core_ids.len() >= n_threads);
+        for (tid, core_id) in (0..n_threads).zip(core_ids.into_iter().step_by(2)) {
+            //for tid in 0..n_threads {
             let txs_local: Vec<Sender<Vec<Box<Chunk<T>>>>> = txs.iter().cloned().collect();
-            let rx_owned = rxs[tid].clone();
+            let rx_owned = rxs.pop_front().unwrap();
 
             let (row_start, row_end) = row_ranges[tid];
             let owned_rows = row_end - row_start;
@@ -381,18 +358,21 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
             let dst = dst.rb();
             let mut scratch = BlockScratch::new(B_ROWS);
 
-            let _handle = s.spawn(move || {
+            let handle = s.spawn(move || {
+                let res = core_affinity::set_for_current(core_id);
+                debug_assert!(res);
                 // SAFETY: non-overlapping thread ownership of dst slice
                 let mut dst_owned = unsafe { dst.subrows(row_start, owned_rows).const_cast() };
                 if let Accum::Replace = beta {
                     dst_owned.fill(zero());
                 }
 
-                let mut empty_chunks = Vec::with_capacity(100);
-                let mut full_chunks: Vec<Vec<Box<Chunk<T>>>> =
-                    (0..n_threads).map(|_| Vec::with_capacity(100)).collect();
+                let mut empty_chunks = Vec::with_capacity(CHUNK_BLOCK);
+                let mut full_chunks: Vec<Vec<Box<Chunk<T>>>> = (0..n_threads)
+                    .map(|_| Vec::with_capacity(CHUNK_BLOCK))
+                    .collect();
                 // TODO: don't pull these off queue just initialize in loop
-                for _ in 0..100 {
+                for _ in 0..CHUNK_BLOCK {
                     let chunk = chunk_queue.pop().unwrap();
                     empty_chunks.push(chunk);
                 }
@@ -439,6 +419,7 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                                             None => {
                                                 let mut maybe_chunk = None;
                                                 while maybe_chunk.is_none() {
+                                                    // TODO: rm chunks in block
                                                     maybe_chunk = chunk_queue.pop()
                                                 }
                                                 let mut chunk = maybe_chunk.unwrap();
@@ -448,10 +429,9 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                                         };
 
                                         std::mem::swap(&mut fresh, chunk);
-                                        // TODO: add to full instead of sending
                                         full_chunks[owner].push(fresh);
-                                        if full_chunks[owner].len() == 100 {
-                                            let mut swap = Vec::with_capacity(100);
+                                        if full_chunks[owner].len() == CHUNK_BLOCK {
+                                            let mut swap = Vec::with_capacity(CHUNK_BLOCK);
                                             std::mem::swap(&mut swap, &mut full_chunks[owner]);
                                             txs_local[owner].send(swap).unwrap();
                                         }
@@ -466,6 +446,7 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                                         None => {
                                             let mut maybe_chunk = None;
                                             while maybe_chunk.is_none() {
+                                                // TODO: rm chunks in block
                                                 maybe_chunk = chunk_queue.pop()
                                             }
                                             let mut chunk = maybe_chunk.unwrap();
@@ -480,7 +461,7 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                         }
                     }
 
-                    if (iter + 1) * n_threads % 1000 == 0 {
+                    if (iter + 1) * n_threads % WS_CHUNKS_PER_THREAD == 0 {
                         let mut by_block: HashMap<usize, Vec<Box<Chunk<T>>>> = HashMap::new();
                         for chunks in rx_owned.try_iter() {
                             for ch in chunks {
@@ -506,15 +487,16 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                             // Accumulate all contributions for this block
                             for chunk in chunks {
                                 debug_assert_eq!(chunk.block_id, block_id);
-                                for (r, v) in (0..chunk.len()).map(|i| &chunk.storage[i]) {
+                                for (r, v) in chunk.storage.iter().take(chunk.len()) {
                                     let local_idx = r - base_row;
                                     debug_assert!(local_idx < block_len);
                                     scratch.add(local_idx, v.clone());
                                 }
                                 let chunk = *chunk;
-                                if empty_chunks.len() < 100 {
+                                if empty_chunks.len() < CHUNK_BLOCK {
                                     empty_chunks.push(chunk);
                                 } else {
+                                    // TODO: add chunks in block
                                     chunk_queue.push(chunk).unwrap();
                                 }
                             }
@@ -540,8 +522,6 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                     }
                 }
                 drop(txs_local);
-
-                //barrier.wait();
 
                 {
                     let mut by_block: HashMap<usize, Vec<Box<Chunk<T>>>> = HashMap::new();
@@ -569,12 +549,15 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                         // Accumulate all contributions for this block
                         for chunk in chunks {
                             debug_assert_eq!(chunk.block_id, block_id);
-                            for (r, v) in (0..chunk.len()).map(|i| &chunk.storage[i]) {
+                            for (r, v) in
+                                chunk.storage.iter().take(chunk.len()).map(|(r, v)| (*r, v))
+                            {
                                 let local_idx = r - base_row;
                                 debug_assert!(local_idx < block_len);
                                 scratch.add(local_idx, v.clone());
                             }
                             let chunk = *chunk;
+                            // TODO: add chunks in block
                             chunk_queue.push(chunk).unwrap();
                         }
 
@@ -582,9 +565,36 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                         scratch.flush_into(dst_owned.rb_mut(), base_local);
                     }
                 }
+                //Instant::now()
             });
+
+            handles.push(handle);
         }
         drop(txs);
+
+        /*
+        let mut finish_times = Vec::with_capacity(n_threads);
+        for handle in handles {
+            let thread_finish_time = handle.join().expect("Thread panicked");
+            println!("{:?}", thread_finish_time);
+            finish_times.push(thread_finish_time);
+        }
+        let min_finish_duration = finish_times
+            .iter()
+            .map(|t| t.duration_since(start_time))
+            .min()
+            .unwrap();
+        let max_finish_duration = finish_times
+            .iter()
+            .map(|t| t.duration_since(start_time))
+            .max()
+            .unwrap();
+
+        let variation = max_finish_duration - min_finish_duration;
+        println!("Min finish duration: {:?}", min_finish_duration);
+        println!("Max finish duration: {:?}", max_finish_duration);
+        println!("Variation (range) in finish times: {:?}", variation);
+        */
     });
 }
 
