@@ -84,7 +84,7 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
 
     let cpus = num_cpus::get();
     let mut thread_counts = Vec::new();
-    let mut n_threads = 4;
+    let mut n_threads = 1;
     while n_threads <= cpus {
         thread_counts.push(n_threads);
         n_threads *= 2;
@@ -184,7 +184,7 @@ fn sequential_benchmarks(c: &mut Criterion) {
 fn parallel_scaling_benchmarks(c: &mut Criterion) {
     println!("Running parallel thread scaling benchmark...");
 
-    for matrix_file in LARGE_MATRICES.iter().chain(SMALL_MATRICES.iter()) {
+    for matrix_file in LARGE_MATRICES.iter() {
         match SimpleMatrixLoader::load_from_matrix_market(matrix_file, 1) {
             Ok(loader) => {
                 println!(

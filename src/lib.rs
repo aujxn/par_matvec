@@ -390,7 +390,7 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
 
                 let mut empty_chunks = Vec::with_capacity(100);
                 let mut full_chunks: Vec<Vec<Box<Chunk<T>>>> =
-                    (0..16).map(|_| Vec::with_capacity(100)).collect();
+                    (0..n_threads).map(|_| Vec::with_capacity(100)).collect();
                 // TODO: don't pull these off queue just initialize in loop
                 for _ in 0..100 {
                     let chunk = chunk_queue.pop().unwrap();
