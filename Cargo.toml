@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+crossbeam-channel = "0.5.15"
 faer = "0.22.6"
 faer-ext = "0.6.0"
 nalgebra = "0.34.0"

@@ -1107,6 +1107,7 @@ name = "par_matvec"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "crossbeam-channel",
  "faer",
  "faer-ext",
  "nalgebra",

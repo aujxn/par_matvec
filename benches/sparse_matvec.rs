@@ -5,9 +5,7 @@ use faer::{Mat, Par};
 use nalgebra::DVector;
 
 use par_matvec::test_utils::{LARGE_MATRICES, SMALL_MATRICES, SimpleMatrixLoader, TestMatrices};
-use par_matvec::{
-    SparseDenseStrategy, dense_sparse_matmul, sparse_dense_matmul, sparse_dense_scratch,
-};
+use par_matvec::{SparseDenseStrategy, sparse_dense_matmul, sparse_dense_scratch};
 
 fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) {
     let mut group = c.benchmark_group(format!(
@@ -93,8 +91,8 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
     }
 
     let rhs_cols = loader.rhs_vector.ncols();
-    let lhs = loader.rhs_vector.transpose();
-    let lhs_rows = lhs.nrows();
+    //let lhs = loader.rhs_vector.transpose();
+    //let lhs_rows = lhs.nrows();
 
     for &num_threads in &thread_counts {
         if let Some(n_threads) = NonZero::new(num_threads) {
@@ -134,6 +132,7 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
                 },
             );
 
+            /*
             let mut output = Mat::zeros(lhs_rows, loader.ncols);
             group.bench_with_input(
                 BenchmarkId::new("dense_sparse", format!("{}_threads", num_threads)),
@@ -153,6 +152,7 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
                     })
                 },
             );
+            */
         }
     }
 
@@ -252,5 +252,6 @@ fn create_synthetic_benchmark_parallel(c: &mut Criterion) {
 criterion_group!(sequential, sequential_benchmarks);
 criterion_group!(parallel, parallel_scaling_benchmarks);
 
-criterion_group!(all, parallel_scaling_benchmarks, sequential_benchmarks);
+//criterion_group!(all, parallel_scaling_benchmarks, sequential_benchmarks);
+criterion_group!(all, parallel_scaling_benchmarks);
 criterion_main!(all);
