@@ -22,10 +22,10 @@ pub const SMALL_MATRICES: &[&str] = &[
 /// Large matrices (>= 1M nnz) for parallel scaling benchmarks
 /// (2d and 3d FEM using continuous linear elements for laplacian problem)
 pub const LARGE_MATRICES: &[&str] = &[
-    "test_matrices/anisotropy_3d_1r.mtx", // 84k x 84k, 1.4M nnz
-    "test_matrices/anisotropy_3d_2r.mtx", // 650k x 650k, 11M nnz
-    "test_matrices/anisotropy_2d.mtx",    // 1.3M x 1.3M, 12M nnz
-    "test_matrices/spe10_0.mtx",          // 1.2M x 1.2M, 31M nnz
+    //"test_matrices/anisotropy_3d_1r.mtx", // 84k x 84k, 1.4M nnz
+    //"test_matrices/anisotropy_3d_2r.mtx", // 650k x 650k, 11M nnz
+    //"test_matrices/anisotropy_2d.mtx",    // 1.3M x 1.3M, 12M nnz
+    "test_matrices/spe10_0.mtx", // 1.2M x 1.2M, 31M nnz
 ];
 
 /// Test matrices struct with all different format representations

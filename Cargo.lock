@@ -1108,6 +1108,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "crossbeam-channel",
+ "crossbeam-queue",
  "faer",
  "faer-ext",
  "nalgebra",

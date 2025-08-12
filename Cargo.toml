@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 crossbeam-channel = "0.5.15"
+crossbeam-queue = "0.3.12"
 faer = "0.22.6"
 faer-ext = "0.6.0"
 nalgebra = "0.34.0"
@@ -21,3 +22,6 @@ criterion = "0.5"
 [[bench]]
 name = "sparse_matvec"
 harness = false
+
+[profile.release]
+debug = true

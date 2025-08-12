@@ -1,4 +1,6 @@
 use crossbeam_channel::{Receiver, Sender, unbounded};
+use crossbeam_queue::ArrayQueue;
+use faer::dyn_stack::DynArray;
 use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::{sync::Arc, thread};
@@ -19,6 +21,9 @@ use faer::{
 };
 
 pub mod test_utils;
+
+const B_ROWS: usize = 32 * 1024; // 32k rows ~ 256KB of y at f64
+const K_CAP: usize = 2048; // ~24KB chunk payload
 
 pub struct SparseDenseStrategy {
     thread_cols: Vec<usize>,
@@ -96,7 +101,8 @@ pub fn sparse_dense_scratch<I: Index, T: ComplexField>(
             if dim >= n_threads * 4 {
                 StackReq::empty()
             } else {
-                temp_mat_scratch::<T>(rhs.nrows(), n_threads)
+                //temp_mat_scratch::<T>(rhs.nrows(), n_threads)
+                StackReq::new::<(usize, T)>(K_CAP * n_threads * 1000)
             }
         }
     }
@@ -215,42 +221,35 @@ impl<T: ComplexField> MergeBuffer<T> {
 */
 
 /// A spill chunk. We batch contributions targeting a single row-block.
-struct Chunk<T: ComplexField> {
-    block_id: usize,  // which row-block these pairs belong to
-    rows: Vec<usize>, // absolute row indices
-    vals: Vec<T>,
+#[derive(Debug)]
+struct Chunk<'a, T: ComplexField> {
+    block_id: usize, // which row-block these pairs belong to
+    storage: &'a mut [(usize, T)],
+    len: usize,
 }
 
-impl<T: ComplexField> Chunk<T> {
-    fn with_capacity(block_id: usize, cap: usize) -> Self {
-        let mut rows = Vec::with_capacity(cap);
-        let mut vals = Vec::with_capacity(cap);
+impl<'a, T: ComplexField> Chunk<'a, T> {
+    fn new(block_id: usize, storage: &'a mut [(usize, T)]) -> Self {
         // keep lengths in lockstep
-        rows.clear();
-        vals.clear();
         Self {
             block_id,
-            rows,
-            vals,
+            storage,
+            len: 0,
         }
     }
     #[inline]
     fn push(&mut self, row: usize, v: T) -> bool {
-        self.rows.push(row);
-        self.vals.push(v);
-        self.rows.len() == self.rows.capacity()
+        self.storage[self.len] = (row, v);
+        self.len += 1;
+        self.len == K_CAP
     }
     #[inline]
     fn len(&self) -> usize {
-        self.rows.len()
+        self.len
     }
     fn clear_reuse(&mut self, new_block: usize) {
         self.block_id = new_block;
-        // keep capacity; just reset length
-        unsafe {
-            self.rows.set_len(0);
-            self.vals.set_len(0);
-        }
+        self.len = 0;
     }
 }
 
@@ -331,8 +330,6 @@ impl<T: ComplexField> BlockScratch<T> {
     }
 }
 
-const B_ROWS: usize = 32 * 1024; // 32k rows ~ 256KB of y at f64
-const K_CAP: usize = 2048; // ~24KB chunk payload
 //
 // NOTE: This merge based algorithm requires row indices to be in sorted order over columns, a soft
 // invariant in faer
@@ -344,17 +341,26 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
     alpha: &T,
     n_threads: usize,
     strategy: &SparseDenseStrategy,
-    _stack: &mut MemStack,
+    stack: &mut MemStack,
 ) {
     let m = lhs.nrows();
     let (owner_of_block, row_ranges) = assign_blocks(m, B_ROWS, n_threads);
     let n_blocks = (m + B_ROWS - 1) / B_ROWS;
 
+    let (mut array, _) = stack.make_with(K_CAP * n_threads * 1000, |_| (0usize, T::zero_impl()));
+    let chunk_queue = Arc::new(ArrayQueue::new(n_threads * 1000));
+    for storage in array.chunks_exact_mut(K_CAP) {
+        let chunk = Chunk::new(0, storage);
+        chunk_queue
+            .push(chunk)
+            .expect("error building chunck store");
+    }
+
     // Per-owner inbox: MPSC of spill chunks
-    let mut txs: Vec<Sender<Box<Chunk<T>>>> = Vec::with_capacity(n_threads);
-    let mut rxs: Vec<Receiver<Box<Chunk<T>>>> = Vec::with_capacity(n_threads);
+    let mut txs: Vec<Sender<Vec<Box<Chunk<T>>>>> = Vec::with_capacity(n_threads);
+    let mut rxs: Vec<Receiver<Vec<Box<Chunk<T>>>>> = Vec::with_capacity(n_threads);
     for _ in 0..n_threads {
-        let (tx, rx) = unbounded::<Box<Chunk<T>>>();
+        let (tx, rx) = unbounded::<Vec<Box<Chunk<T>>>>();
         txs.push(tx);
         rxs.push(rx);
     }
@@ -364,20 +370,31 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
 
     thread::scope(|s| {
         for tid in 0..n_threads {
-            let txs_local: Vec<Sender<Box<Chunk<T>>>> = txs.iter().cloned().collect();
+            let txs_local: Vec<Sender<Vec<Box<Chunk<T>>>>> = txs.iter().cloned().collect();
             let rx_owned = rxs[tid].clone();
 
             let (row_start, row_end) = row_ranges[tid];
             let owned_rows = row_end - row_start;
 
             let owner_of_block = owner_of_block.clone();
+            let chunk_queue = chunk_queue.clone();
             let dst = dst.rb();
+            let mut scratch = BlockScratch::new(B_ROWS);
 
             let _handle = s.spawn(move || {
                 // SAFETY: non-overlapping thread ownership of dst slice
                 let mut dst_owned = unsafe { dst.subrows(row_start, owned_rows).const_cast() };
                 if let Accum::Replace = beta {
                     dst_owned.fill(zero());
+                }
+
+                let mut empty_chunks = Vec::with_capacity(100);
+                let mut full_chunks: Vec<Vec<Box<Chunk<T>>>> =
+                    (0..16).map(|_| Vec::with_capacity(100)).collect();
+                // TODO: don't pull these off queue just initialize in loop
+                for _ in 0..100 {
+                    let chunk = chunk_queue.pop().unwrap();
+                    empty_chunks.push(chunk);
                 }
 
                 let mut open: Vec<Option<Box<Chunk<T>>>> = (0..n_blocks).map(|_| None).collect();
@@ -387,7 +404,7 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                 let idx_start = strategy.thread_indptrs[tid];
                 let idx_end = strategy.thread_indptrs[tid + 1];
 
-                for depth in col_start..=col_end {
+                for (iter, depth) in (col_start..=col_end).enumerate() {
                     let rhs_k = rhs[depth].mul_by_ref(alpha);
                     let mut col_range = lhs_symbolic.col_range(depth);
                     if depth == col_start {
@@ -413,23 +430,97 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                                 Some(ref mut chunk) => {
                                     if chunk.push(i, contrib) {
                                         // full -> send and remove
-                                        // NOTE: ch consumed; replace with fresh
-                                        let mut fresh =
-                                            Box::new(Chunk::with_capacity(block_id, K_CAP));
-                                        fresh.rows.reserve_exact(K_CAP);
-                                        fresh.vals.reserve_exact(K_CAP);
+                                        // NOTE: chunk consumed; replace with fresh
+                                        let mut fresh = match empty_chunks.pop() {
+                                            Some(mut chunk) => {
+                                                chunk.clear_reuse(block_id);
+                                                Box::new(chunk)
+                                            }
+                                            None => {
+                                                let mut maybe_chunk = None;
+                                                while maybe_chunk.is_none() {
+                                                    maybe_chunk = chunk_queue.pop()
+                                                }
+                                                let mut chunk = maybe_chunk.unwrap();
+                                                chunk.clear_reuse(block_id);
+                                                Box::new(chunk)
+                                            }
+                                        };
+
                                         std::mem::swap(&mut fresh, chunk);
-                                        txs_local[owner].send(fresh).unwrap();
+                                        // TODO: add to full instead of sending
+                                        full_chunks[owner].push(fresh);
+                                        if full_chunks[owner].len() == 100 {
+                                            let mut swap = Vec::with_capacity(100);
+                                            std::mem::swap(&mut swap, &mut full_chunks[owner]);
+                                            txs_local[owner].send(swap).unwrap();
+                                        }
                                     }
                                 }
                                 None => {
-                                    let mut chunk = Box::new(Chunk::with_capacity(block_id, K_CAP));
-                                    chunk.rows.reserve_exact(K_CAP);
-                                    chunk.vals.reserve_exact(K_CAP);
+                                    let mut chunk = match empty_chunks.pop() {
+                                        Some(mut chunk) => {
+                                            chunk.clear_reuse(block_id);
+                                            Box::new(chunk)
+                                        }
+                                        None => {
+                                            let mut maybe_chunk = None;
+                                            while maybe_chunk.is_none() {
+                                                maybe_chunk = chunk_queue.pop()
+                                            }
+                                            let mut chunk = maybe_chunk.unwrap();
+                                            chunk.clear_reuse(block_id);
+                                            Box::new(chunk)
+                                        }
+                                    };
                                     let _cant_be_full = chunk.push(i, contrib);
                                     open[block_id] = Some(chunk);
                                 }
                             }
+                        }
+                    }
+
+                    if (iter + 1) * n_threads % 1000 == 0 {
+                        let mut by_block: HashMap<usize, Vec<Box<Chunk<T>>>> = HashMap::new();
+                        for chunks in rx_owned.try_iter() {
+                            for ch in chunks {
+                                by_block.entry(ch.block_id).or_default().push(ch);
+                            }
+                        }
+
+                        // Process each owned block
+                        for (block_id, chunks) in by_block.into_iter() {
+                            // This block must be owned by tid.
+                            debug_assert_eq!(owner_of_block[block_id], tid);
+                            scratch.start_block();
+
+                            let base_row = block_id * B_ROWS;
+                            let block_len = if base_row + B_ROWS <= row_end {
+                                B_ROWS
+                            } else {
+                                // tail block may be shorter
+                                m - base_row
+                            };
+                            let base_local = base_row - row_start; // offset into y_owned
+
+                            // Accumulate all contributions for this block
+                            for chunk in chunks {
+                                debug_assert_eq!(chunk.block_id, block_id);
+                                for (r, v) in (0..chunk.len()).map(|i| &chunk.storage[i]) {
+                                    let local_idx = r - base_row;
+                                    debug_assert!(local_idx < block_len);
+                                    scratch.add(local_idx, v.clone());
+                                }
+                                let chunk = *chunk;
+                                if empty_chunks.len() < 100 {
+                                    empty_chunks.push(chunk);
+                                } else {
+                                    chunk_queue.push(chunk).unwrap();
+                                }
+                            }
+
+                            // Scatter reduced sums into y
+                            scratch.flush_into(dst_owned.rb_mut(), base_local);
                         }
                     }
                 }
@@ -439,51 +530,57 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                     if let Some(chunk) = maybe_chunk {
                         if chunk.len() > 0 {
                             let owner = owner_of_block[block_id];
-                            txs_local[owner].send(chunk).unwrap();
+                            full_chunks[owner].push(chunk);
                         }
+                    }
+                }
+                for (owner, chunks) in full_chunks.into_iter().enumerate() {
+                    if !chunks.is_empty() {
+                        txs_local[owner].send(chunks).unwrap();
                     }
                 }
                 drop(txs_local);
 
                 //barrier.wait();
 
-                let mut by_block: HashMap<usize, Vec<Box<Chunk<T>>>> = HashMap::new();
-                for ch in rx_owned.iter() {
-                    by_block.entry(ch.block_id).or_default().push(ch);
-                }
-
-                let mut scratch = BlockScratch::new(B_ROWS);
-
-                // Process each owned block
-                for (block_id, chunks) in by_block.into_iter() {
-                    // This block must be owned by tid.
-                    debug_assert_eq!(owner_of_block[block_id], tid);
-                    scratch.start_block();
-
-                    let base_row = block_id * B_ROWS;
-                    let block_len = if base_row + B_ROWS <= row_end {
-                        B_ROWS
-                    } else {
-                        // tail block may be shorter
-                        m - base_row
-                    };
-                    let base_local = base_row - row_start; // offset into y_owned
-
-                    // Accumulate all contributions for this block
-                    for chunk in chunks {
-                        debug_assert_eq!(chunk.block_id, block_id);
-                        for i in 0..chunk.rows.len() {
-                            let r = chunk.rows[i] as usize;
-                            let v = chunk.vals[i].clone();
-                            let local_idx = r - base_row;
-                            debug_assert!(local_idx < block_len);
-                            scratch.add(local_idx, v);
+                {
+                    let mut by_block: HashMap<usize, Vec<Box<Chunk<T>>>> = HashMap::new();
+                    for chunks in rx_owned.iter() {
+                        for ch in chunks {
+                            by_block.entry(ch.block_id).or_default().push(ch);
                         }
-                        // Box<Chunk> drops here; memory returned to the allocator.
                     }
 
-                    // Scatter reduced sums into y
-                    scratch.flush_into(dst_owned.rb_mut(), base_local);
+                    // Process each owned block
+                    for (block_id, chunks) in by_block.into_iter() {
+                        // This block must be owned by tid.
+                        debug_assert_eq!(owner_of_block[block_id], tid);
+                        scratch.start_block();
+
+                        let base_row = block_id * B_ROWS;
+                        let block_len = if base_row + B_ROWS <= row_end {
+                            B_ROWS
+                        } else {
+                            // tail block may be shorter
+                            m - base_row
+                        };
+                        let base_local = base_row - row_start; // offset into y_owned
+
+                        // Accumulate all contributions for this block
+                        for chunk in chunks {
+                            debug_assert_eq!(chunk.block_id, block_id);
+                            for (r, v) in (0..chunk.len()).map(|i| &chunk.storage[i]) {
+                                let local_idx = r - base_row;
+                                debug_assert!(local_idx < block_len);
+                                scratch.add(local_idx, v.clone());
+                            }
+                            let chunk = *chunk;
+                            chunk_queue.push(chunk).unwrap();
+                        }
+
+                        // Scatter reduced sums into y
+                        scratch.flush_into(dst_owned.rb_mut(), base_local);
+                    }
                 }
             });
         }

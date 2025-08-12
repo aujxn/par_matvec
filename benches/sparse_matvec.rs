@@ -84,7 +84,7 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
 
     let cpus = num_cpus::get();
     let mut thread_counts = Vec::new();
-    let mut n_threads = 1;
+    let mut n_threads = 4;
     while n_threads <= cpus {
         thread_counts.push(n_threads);
         n_threads *= 2;
@@ -200,7 +200,7 @@ fn parallel_scaling_benchmarks(c: &mut Criterion) {
         }
     }
 
-    create_synthetic_benchmark_parallel(c);
+    //create_synthetic_benchmark_parallel(c);
 }
 
 fn sparse_matvec_benchmarks(c: &mut Criterion) {
