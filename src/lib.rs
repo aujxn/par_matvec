@@ -1,9 +1,8 @@
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_queue::ArrayQueue;
-use faer::dyn_stack::DynArray;
-use std::cmp::{max, min};
+use faer::Col;
+use std::cmp::min;
 use std::collections::{HashMap, VecDeque};
-use std::time::Instant;
 use std::{sync::Arc, thread};
 
 use faer::{
@@ -27,7 +26,7 @@ pub mod test_utils;
 //const K_CAP: usize = 2048; // ~24KB chunk payload
 const B_ROWS: usize = 16 * 1024;
 const K_CAP: usize = 1024;
-const WS_CHUNKS_PER_THREAD: usize = 200; // how many chunks to put in the chunk pool
+const WS_CHUNKS_PER_THREAD: usize = 300; // how many chunks to put in the chunk pool
 const CHUNK_BLOCK: usize = 5; // how many chunks to buffer in communication
 
 pub struct SparseDenseStrategy {
@@ -167,18 +166,18 @@ pub fn sparse_dense_matmul<I: Index, T: ComplexField>(
             } else {
                 for (dst, rhs) in dst.col_iter_mut().zip(rhs.col_iter()) {
                     let mut dst = dst;
-                    for _ in 0..3000 {
-                        par_sparse_dense(
-                            dst.rb_mut(),
-                            beta,
-                            lhs,
-                            rhs,
-                            &alpha,
-                            n_threads,
-                            strategy,
-                            stack,
-                        );
-                    }
+                    //for _ in 0..3000 {
+                    par_sparse_dense(
+                        dst.rb_mut(),
+                        beta,
+                        lhs,
+                        rhs,
+                        &alpha,
+                        n_threads,
+                        strategy,
+                        stack,
+                    );
+                    //}
                 }
             }
         }
@@ -296,6 +295,94 @@ impl<T: ComplexField> BlockScratch<T> {
     }
 }
 
+fn collect_chunks<'a, T: ComplexField>(
+    chunk_recv: &Receiver<Vec<Box<Chunk<'a, T>>>>,
+    owner_of_block: &Vec<usize>,
+    scratch: &mut BlockScratch<T>,
+    empty_chunks: &mut Vec<Chunk<'a, T>>,
+    chunk_queue: &Arc<ArrayQueue<Chunk<'a, T>>>,
+    mut dst_owned: ColMut<T>,
+    row_start: usize,
+    row_end: usize,
+    tid: usize,
+    m: usize,
+    finished: bool,
+) {
+    let mut by_block: HashMap<usize, Vec<Box<Chunk<T>>>> = HashMap::new();
+    if !finished {
+        for chunks in chunk_recv.try_iter() {
+            for ch in chunks {
+                by_block.entry(ch.block_id).or_default().push(ch);
+            }
+        }
+    } else {
+        for chunks in chunk_recv.iter() {
+            for ch in chunks {
+                by_block.entry(ch.block_id).or_default().push(ch);
+            }
+        }
+    }
+
+    // Process each owned block
+    for (block_id, chunks) in by_block.into_iter() {
+        // This block must be owned by tid.
+        debug_assert_eq!(owner_of_block[block_id], tid);
+        scratch.start_block();
+
+        let base_row = block_id * B_ROWS;
+        let block_len = if base_row + B_ROWS <= row_end {
+            B_ROWS
+        } else {
+            // tail block may be shorter
+            m - base_row
+        };
+        let base_local = base_row - row_start; // offset into y_owned
+
+        // Accumulate all contributions for this block
+        for chunk in chunks {
+            debug_assert_eq!(chunk.block_id, block_id);
+            for (r, v) in chunk.storage.iter().take(chunk.len()) {
+                let local_idx = r - base_row;
+                debug_assert!(local_idx < block_len);
+                scratch.add(local_idx, v.clone());
+            }
+            let chunk = *chunk;
+            if empty_chunks.len() < CHUNK_BLOCK {
+                empty_chunks.push(chunk);
+            } else {
+                // TODO: add chunks in block
+                chunk_queue.push(chunk).unwrap();
+            }
+        }
+
+        // Scatter reduced sums into y
+        scratch.flush_into(dst_owned.rb_mut(), base_local);
+    }
+}
+
+fn get_fresh_chunk<'a, T: ComplexField>(
+    empty_chunks: &mut Vec<Chunk<'a, T>>,
+    block_id: usize,
+    chunk_queue: &Arc<ArrayQueue<Chunk<'a, T>>>,
+) -> Box<Chunk<'a, T>> {
+    match empty_chunks.pop() {
+        Some(mut chunk) => {
+            chunk.clear_reuse(block_id);
+            Box::new(chunk)
+        }
+        None => {
+            let mut maybe_chunk = None;
+            while maybe_chunk.is_none() {
+                // TODO: rm chunks in block
+                maybe_chunk = chunk_queue.pop()
+            }
+            let mut chunk = maybe_chunk.unwrap();
+            chunk.clear_reuse(block_id);
+            Box::new(chunk)
+        }
+    }
+}
+
 //
 // NOTE: This merge based algorithm requires row indices to be in sorted order over columns, a soft
 // invariant in faer
@@ -320,19 +407,14 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
     let chunk_queue = Arc::new(ArrayQueue::new(n_threads * WS_CHUNKS_PER_THREAD));
     for storage in array.chunks_exact_mut(K_CAP) {
         let chunk = Chunk::new(0, storage);
-        chunk_queue
-            .push(chunk)
-            .expect("error building chunck store");
+        chunk_queue.push(chunk).expect("error building chunk store");
     }
 
     // Per-owner inbox: MPSC of spill chunks
-    ////let mut txs: Vec<Sender<Vec<Box<Chunk<T>>>>> = Vec::with_capacity(n_threads);
-    //let mut rxs: VecDeque<Receiver<Vec<Box<Chunk<T>>>>> = Vec::with_capacity(n_threads);
     let mut txs = Vec::with_capacity(n_threads);
     let mut rxs = VecDeque::with_capacity(n_threads);
     for _ in 0..n_threads {
         let (tx, rx) = unbounded::<Vec<Box<Chunk<T>>>>();
-        //let (tx, rx) = channel::<Vec<Box<Chunk<T>>>>();
         txs.push(tx);
         rxs.push_back(rx);
     }
@@ -345,7 +427,7 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
         //let start_time = Instant::now();
         let core_ids = core_affinity::get_core_ids().unwrap();
         debug_assert!(core_ids.len() >= n_threads);
-        for (tid, core_id) in (0..n_threads).zip(core_ids.into_iter().step_by(2)) {
+        for (tid, core_id) in (0..n_threads).zip(core_ids.into_iter()) {
             //for tid in 0..n_threads {
             let txs_local: Vec<Sender<Vec<Box<Chunk<T>>>>> = txs.iter().cloned().collect();
             let rx_owned = rxs.pop_front().unwrap();
@@ -411,22 +493,11 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                                     if chunk.push(i, contrib) {
                                         // full -> send and remove
                                         // NOTE: chunk consumed; replace with fresh
-                                        let mut fresh = match empty_chunks.pop() {
-                                            Some(mut chunk) => {
-                                                chunk.clear_reuse(block_id);
-                                                Box::new(chunk)
-                                            }
-                                            None => {
-                                                let mut maybe_chunk = None;
-                                                while maybe_chunk.is_none() {
-                                                    // TODO: rm chunks in block
-                                                    maybe_chunk = chunk_queue.pop()
-                                                }
-                                                let mut chunk = maybe_chunk.unwrap();
-                                                chunk.clear_reuse(block_id);
-                                                Box::new(chunk)
-                                            }
-                                        };
+                                        let mut fresh = get_fresh_chunk(
+                                            &mut empty_chunks,
+                                            block_id,
+                                            &chunk_queue,
+                                        );
 
                                         std::mem::swap(&mut fresh, chunk);
                                         full_chunks[owner].push(fresh);
@@ -438,22 +509,8 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                                     }
                                 }
                                 None => {
-                                    let mut chunk = match empty_chunks.pop() {
-                                        Some(mut chunk) => {
-                                            chunk.clear_reuse(block_id);
-                                            Box::new(chunk)
-                                        }
-                                        None => {
-                                            let mut maybe_chunk = None;
-                                            while maybe_chunk.is_none() {
-                                                // TODO: rm chunks in block
-                                                maybe_chunk = chunk_queue.pop()
-                                            }
-                                            let mut chunk = maybe_chunk.unwrap();
-                                            chunk.clear_reuse(block_id);
-                                            Box::new(chunk)
-                                        }
-                                    };
+                                    let mut chunk =
+                                        get_fresh_chunk(&mut empty_chunks, block_id, &chunk_queue);
                                     let _cant_be_full = chunk.push(i, contrib);
                                     open[block_id] = Some(chunk);
                                 }
@@ -462,48 +519,19 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                     }
 
                     if (iter + 1) * n_threads % WS_CHUNKS_PER_THREAD == 0 {
-                        let mut by_block: HashMap<usize, Vec<Box<Chunk<T>>>> = HashMap::new();
-                        for chunks in rx_owned.try_iter() {
-                            for ch in chunks {
-                                by_block.entry(ch.block_id).or_default().push(ch);
-                            }
-                        }
-
-                        // Process each owned block
-                        for (block_id, chunks) in by_block.into_iter() {
-                            // This block must be owned by tid.
-                            debug_assert_eq!(owner_of_block[block_id], tid);
-                            scratch.start_block();
-
-                            let base_row = block_id * B_ROWS;
-                            let block_len = if base_row + B_ROWS <= row_end {
-                                B_ROWS
-                            } else {
-                                // tail block may be shorter
-                                m - base_row
-                            };
-                            let base_local = base_row - row_start; // offset into y_owned
-
-                            // Accumulate all contributions for this block
-                            for chunk in chunks {
-                                debug_assert_eq!(chunk.block_id, block_id);
-                                for (r, v) in chunk.storage.iter().take(chunk.len()) {
-                                    let local_idx = r - base_row;
-                                    debug_assert!(local_idx < block_len);
-                                    scratch.add(local_idx, v.clone());
-                                }
-                                let chunk = *chunk;
-                                if empty_chunks.len() < CHUNK_BLOCK {
-                                    empty_chunks.push(chunk);
-                                } else {
-                                    // TODO: add chunks in block
-                                    chunk_queue.push(chunk).unwrap();
-                                }
-                            }
-
-                            // Scatter reduced sums into y
-                            scratch.flush_into(dst_owned.rb_mut(), base_local);
-                        }
+                        collect_chunks(
+                            &rx_owned,
+                            &owner_of_block,
+                            &mut scratch,
+                            &mut empty_chunks,
+                            &chunk_queue,
+                            dst_owned.rb_mut(),
+                            row_start,
+                            row_end,
+                            tid,
+                            m,
+                            false,
+                        );
                     }
                 }
 
@@ -523,48 +551,20 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                 }
                 drop(txs_local);
 
-                {
-                    let mut by_block: HashMap<usize, Vec<Box<Chunk<T>>>> = HashMap::new();
-                    for chunks in rx_owned.iter() {
-                        for ch in chunks {
-                            by_block.entry(ch.block_id).or_default().push(ch);
-                        }
-                    }
+                collect_chunks(
+                    &rx_owned,
+                    &owner_of_block,
+                    &mut scratch,
+                    &mut empty_chunks,
+                    &chunk_queue,
+                    dst_owned.rb_mut(),
+                    row_start,
+                    row_end,
+                    tid,
+                    m,
+                    true,
+                );
 
-                    // Process each owned block
-                    for (block_id, chunks) in by_block.into_iter() {
-                        // This block must be owned by tid.
-                        debug_assert_eq!(owner_of_block[block_id], tid);
-                        scratch.start_block();
-
-                        let base_row = block_id * B_ROWS;
-                        let block_len = if base_row + B_ROWS <= row_end {
-                            B_ROWS
-                        } else {
-                            // tail block may be shorter
-                            m - base_row
-                        };
-                        let base_local = base_row - row_start; // offset into y_owned
-
-                        // Accumulate all contributions for this block
-                        for chunk in chunks {
-                            debug_assert_eq!(chunk.block_id, block_id);
-                            for (r, v) in
-                                chunk.storage.iter().take(chunk.len()).map(|(r, v)| (*r, v))
-                            {
-                                let local_idx = r - base_row;
-                                debug_assert!(local_idx < block_len);
-                                scratch.add(local_idx, v.clone());
-                            }
-                            let chunk = *chunk;
-                            // TODO: add chunks in block
-                            chunk_queue.push(chunk).unwrap();
-                        }
-
-                        // Scatter reduced sums into y
-                        scratch.flush_into(dst_owned.rb_mut(), base_local);
-                    }
-                }
                 //Instant::now()
             });
 
