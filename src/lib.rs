@@ -3,6 +3,7 @@ use crossbeam_queue::ArrayQueue;
 use faer::Col;
 use std::cmp::min;
 use std::collections::{HashMap, VecDeque};
+use std::ops::Range;
 use std::{sync::Arc, thread};
 
 use faer::{
@@ -26,7 +27,7 @@ pub mod test_utils;
 //const K_CAP: usize = 2048; // ~24KB chunk payload
 const B_ROWS: usize = 16 * 1024;
 const K_CAP: usize = 1024;
-const WS_CHUNKS_PER_THREAD: usize = 300; // how many chunks to put in the chunk pool
+const WS_CHUNKS_PER_THREAD: usize = 200; // how many chunks to put in the chunk pool
 const CHUNK_BLOCK: usize = 5; // how many chunks to buffer in communication
 
 pub struct SparseDenseStrategy {
@@ -383,6 +384,84 @@ fn get_fresh_chunk<'a, T: ComplexField>(
     }
 }
 
+fn hot_loop<'a, I: Index, T: ComplexField>(
+    col_range: Range<usize>,
+    row_indices: &[I],
+    lhs_values: &[T],
+    rhs_k: &T,
+    owner_of_block: &Vec<usize>,
+    tid: usize,
+    row_start: usize,
+    owned_rows: usize,
+    mut dst_owned: ColMut<T>,
+    open: &mut Vec<Option<Box<Chunk<'a, T>>>>,
+    chunk_queue: &Arc<ArrayQueue<Chunk<'a, T>>>,
+    full_chunks: &mut Vec<Vec<Box<Chunk<'a, T>>>>,
+    empty_chunks: &mut Vec<Chunk<'a, T>>,
+    txs_local: &Vec<Sender<Vec<Box<Chunk<'a, T>>>>>,
+) {
+    for idx in col_range {
+        let i = row_indices[idx].zx();
+        let lhs_ik = &lhs_values[idx];
+        let contrib = lhs_ik.mul_by_ref(rhs_k);
+        let block_id = i / B_ROWS;
+        let owner = owner_of_block[block_id];
+
+        if owner == tid {
+            let local_idx = i - row_start;
+            debug_assert!(local_idx < owned_rows);
+            dst_owned[local_idx] = dst_owned[local_idx].add_by_ref(&contrib);
+        } else {
+            buffer_foreign(
+                block_id,
+                owner,
+                open,
+                i,
+                contrib,
+                chunk_queue,
+                full_chunks,
+                empty_chunks,
+                txs_local,
+            );
+        }
+    }
+}
+
+fn buffer_foreign<'a, T: ComplexField>(
+    block_id: usize,
+    owner: usize,
+    open: &mut Vec<Option<Box<Chunk<'a, T>>>>,
+    i: usize,
+    contrib: T,
+    chunk_queue: &Arc<ArrayQueue<Chunk<'a, T>>>,
+    full_chunks: &mut Vec<Vec<Box<Chunk<'a, T>>>>,
+    empty_chunks: &mut Vec<Chunk<'a, T>>,
+    txs_local: &Vec<Sender<Vec<Box<Chunk<'a, T>>>>>,
+) {
+    match open[block_id] {
+        Some(ref mut chunk) => {
+            if chunk.push(i, contrib) {
+                // full -> send and remove
+                // NOTE: chunk consumed; replace with fresh
+                let mut fresh = get_fresh_chunk(empty_chunks, block_id, &chunk_queue);
+
+                std::mem::swap(&mut fresh, chunk);
+                full_chunks[owner].push(fresh);
+                if full_chunks[owner].len() == CHUNK_BLOCK {
+                    let mut swap = Vec::with_capacity(CHUNK_BLOCK);
+                    std::mem::swap(&mut swap, &mut full_chunks[owner]);
+                    txs_local[owner].send(swap).unwrap();
+                }
+            }
+        }
+        None => {
+            let mut chunk = get_fresh_chunk(empty_chunks, block_id, &chunk_queue);
+            let _cant_be_full = chunk.push(i, contrib);
+            open[block_id] = Some(chunk);
+        }
+    }
+}
+
 //
 // NOTE: This merge based algorithm requires row indices to be in sorted order over columns, a soft
 // invariant in faer
@@ -475,48 +554,23 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
                     if depth == col_end {
                         col_range.end = idx_end;
                     }
-                    for idx in col_range {
-                        let i = row_indices[idx].zx();
-                        let lhs_ik = &lhs_values[idx];
-                        let contrib = lhs_ik.mul_by_ref(&rhs_k);
-                        let block_id = i / B_ROWS;
-                        let owner = owner_of_block[block_id];
 
-                        if owner == tid {
-                            let local_idx = i - row_start;
-                            debug_assert!(local_idx < owned_rows);
-                            dst_owned[local_idx] = dst_owned[local_idx].add_by_ref(&contrib);
-                        } else {
-                            // Foreign: append to the chunk for block b
-                            match open[block_id] {
-                                Some(ref mut chunk) => {
-                                    if chunk.push(i, contrib) {
-                                        // full -> send and remove
-                                        // NOTE: chunk consumed; replace with fresh
-                                        let mut fresh = get_fresh_chunk(
-                                            &mut empty_chunks,
-                                            block_id,
-                                            &chunk_queue,
-                                        );
-
-                                        std::mem::swap(&mut fresh, chunk);
-                                        full_chunks[owner].push(fresh);
-                                        if full_chunks[owner].len() == CHUNK_BLOCK {
-                                            let mut swap = Vec::with_capacity(CHUNK_BLOCK);
-                                            std::mem::swap(&mut swap, &mut full_chunks[owner]);
-                                            txs_local[owner].send(swap).unwrap();
-                                        }
-                                    }
-                                }
-                                None => {
-                                    let mut chunk =
-                                        get_fresh_chunk(&mut empty_chunks, block_id, &chunk_queue);
-                                    let _cant_be_full = chunk.push(i, contrib);
-                                    open[block_id] = Some(chunk);
-                                }
-                            }
-                        }
-                    }
+                    hot_loop(
+                        col_range,
+                        row_indices,
+                        lhs_values,
+                        &rhs_k,
+                        &owner_of_block,
+                        tid,
+                        row_start,
+                        owned_rows,
+                        dst_owned.rb_mut(),
+                        &mut open,
+                        &chunk_queue,
+                        &mut full_chunks,
+                        &mut empty_chunks,
+                        &txs_local,
+                    );
 
                     if (iter + 1) * n_threads % WS_CHUNKS_PER_THREAD == 0 {
                         collect_chunks(
