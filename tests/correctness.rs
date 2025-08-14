@@ -3,8 +3,10 @@ use std::num::NonZero;
 use faer::{Mat, Par};
 use nalgebra::DVector;
 
-use par_matvec::test_utils::{SMALL_MATRICES, TestMatrices};
-use par_matvec::{SparseDenseStrategy, sparse_dense_matmul, sparse_dense_scratch};
+use par_matvec::test_utils::{small_matrix_paths, TestMatrices};
+use par_matvec::{
+    SparseDenseStrategy, dense_sparse_matmul, sparse_dense_matmul, sparse_dense_scratch,
+};
 
 /// Tolerance for floating point comparisons
 const RELATIVE_TOLERANCE: f64 = 1e-12;
@@ -211,32 +213,30 @@ fn test_parallel_implementations(
                 num_threads
             );
 
-            /*
-                        let mut parallel_output = Mat::zeros(1, matrices.nrows);
-                        dense_sparse_matmul(
-                            parallel_output.as_mut(),
-                            faer::Accum::Replace,
-                            lhs_vector,
-                            matrices.faer_csc.as_ref(),
-                            1.0,
-                            par,
-                            &strategy,
-                            &mut stack,
-                        );
+            let mut parallel_output = Mat::zeros(1, matrices.nrows);
+            dense_sparse_matmul(
+                parallel_output.as_mut(),
+                faer::Accum::Replace,
+                lhs_vector,
+                matrices.faer_csc.as_ref(),
+                1.0,
+                par,
+                &strategy,
+                &mut stack,
+            );
 
-                        assert!(
-                            vectors_are_equal(
-                                &dense_sparse_reference_output,
-                                &parallel_output,
-                                RELATIVE_TOLERANCE,
-                                ABSOLUTE_TOLERANCE
-                            ),
-                            "Parallel dense-sparse implementation with {} threads differs from reference\n{:?}\n{:?}",
-                            num_threads,
-                            dense_sparse_reference_output,
-                            parallel_output
-                        );
-            */
+            assert!(
+                vectors_are_equal(
+                    &dense_sparse_reference_output,
+                    &parallel_output,
+                    RELATIVE_TOLERANCE,
+                    ABSOLUTE_TOLERANCE
+                ),
+                "Parallel dense-sparse implementation with {} threads differs from reference\n{:?}\n{:?}",
+                num_threads,
+                dense_sparse_reference_output,
+                parallel_output
+            );
 
             println!(
                 "  ✓ Custom parallel with {} threads matches reference",
@@ -275,20 +275,20 @@ fn test_synthetic_matrices() {
 
 #[test]
 fn test_matrix_market_files() {
-    let matrix_files = SMALL_MATRICES;
+    let matrix_paths: Vec<_> = small_matrix_paths().collect();
 
-    for matrix_file in matrix_files {
-        if std::path::Path::new(matrix_file).exists() {
-            println!("\nTesting matrix file: {}", matrix_file);
-            match TestMatrices::load_from_matrix_market(matrix_file, 1) {
+    for matrix_path in matrix_paths {
+        if matrix_path.exists() {
+            println!("\nTesting matrix file: {}", matrix_path.display());
+            match TestMatrices::load_from_matrix_market(&matrix_path, 1) {
                 Ok(matrices) => {
                     test_sequential_implementations(&matrices)
-                        .expect(&format!("Sequential tests failed on {}", matrix_file));
+                        .expect(&format!("Sequential tests failed on {}", matrix_path.display()));
 
                     // Only test parallel if matrix has enough non-zeros
                     if matrices.nnz > 1000 {
                         test_parallel_implementations(&matrices)
-                            .expect(&format!("Parallel tests failed on {}", matrix_file));
+                            .expect(&format!("Parallel tests failed on {}", matrix_path.display()));
                     } else {
                         println!(
                             "  Skipping parallel test (too few non-zeros: {})",
@@ -297,11 +297,11 @@ fn test_matrix_market_files() {
                     }
                 }
                 Err(e) => {
-                    panic!("Failed to load matrix market file {}: {}", matrix_file, e);
+                    panic!("Failed to load matrix market file {}: {}", matrix_path.display(), e);
                 }
             }
         } else {
-            println!("Matrix file {} not found, skipping", matrix_file);
+            println!("Matrix file {} not found, skipping", matrix_path.display());
         }
     }
 

@@ -4,8 +4,10 @@ use std::num::NonZero;
 use faer::{Mat, Par};
 use nalgebra::DVector;
 
-use par_matvec::test_utils::{LARGE_MATRICES, SMALL_MATRICES, SimpleMatrixLoader, TestMatrices};
-use par_matvec::{SparseDenseStrategy, sparse_dense_matmul, sparse_dense_scratch};
+use par_matvec::test_utils::{large_matrix_paths, small_matrix_paths, FaerLoader, TestMatrices};
+use par_matvec::{
+    SparseDenseStrategy, dense_sparse_matmul, sparse_dense_matmul, sparse_dense_scratch,
+};
 
 fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) {
     let mut group = c.benchmark_group(format!(
@@ -75,7 +77,7 @@ fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) 
     group.finish();
 }
 
-fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader) {
+fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &FaerLoader) {
     let mut group = c.benchmark_group(format!(
         "thread_scaling_{}-{}x{}_nnz{}",
         loader.matrix_name, loader.nrows, loader.ncols, loader.nnz
@@ -84,15 +86,15 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
 
     let cpus = num_cpus::get();
     let mut thread_counts = Vec::new();
-    let mut n_threads = 8;
+    let mut n_threads = 1;
     while n_threads <= cpus {
         thread_counts.push(n_threads);
         n_threads *= 2;
     }
 
     let rhs_cols = loader.rhs_vector.ncols();
-    //let lhs = loader.rhs_vector.transpose();
-    //let lhs_rows = lhs.nrows();
+    let lhs = loader.rhs_vector.transpose();
+    let lhs_rows = lhs.nrows();
 
     for &num_threads in &thread_counts {
         if let Some(n_threads) = NonZero::new(num_threads) {
@@ -131,9 +133,7 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
                     })
                 },
             );
-            break;
 
-            /*
             let mut output = Mat::zeros(lhs_rows, loader.ncols);
             group.bench_with_input(
                 BenchmarkId::new("dense_sparse", format!("{}_threads", num_threads)),
@@ -153,7 +153,6 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
                     })
                 },
             );
-            */
         }
     }
 
@@ -163,8 +162,9 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &SimpleMatrixLoader)
 fn sequential_benchmarks(c: &mut Criterion) {
     println!("Running sequential implementations benchmark...");
 
-    for matrix_file in SMALL_MATRICES {
-        match TestMatrices::load_from_matrix_market(matrix_file, 1) {
+    let matrix_paths: Vec<_> = small_matrix_paths().collect();
+    for matrix_path in matrix_paths {
+        match TestMatrices::load_from_matrix_market(&matrix_path, 1) {
             Ok(matrices) => {
                 println!(
                     "Loaded matrix '{}': {}x{} with {} non-zeros",
@@ -174,7 +174,7 @@ fn sequential_benchmarks(c: &mut Criterion) {
                 bench_sequential_implementations(c, &matrices);
             }
             Err(e) => {
-                eprintln!("Failed to load matrix '{}': {}", matrix_file, e);
+                eprintln!("Failed to load matrix '{}': {}", matrix_path.display(), e);
             }
         }
     }
@@ -185,8 +185,9 @@ fn sequential_benchmarks(c: &mut Criterion) {
 fn parallel_scaling_benchmarks(c: &mut Criterion) {
     println!("Running parallel thread scaling benchmark...");
 
-    for matrix_file in LARGE_MATRICES.iter() {
-        match SimpleMatrixLoader::load_from_matrix_market(matrix_file, 1) {
+    let matrix_paths: Vec<_> = large_matrix_paths().collect();
+    for matrix_path in matrix_paths {
+        match FaerLoader::load_from_matrix_market(&matrix_path, 1) {
             Ok(loader) => {
                 println!(
                     "Loaded matrix '{}': {}x{} with {} non-zeros",
@@ -196,7 +197,7 @@ fn parallel_scaling_benchmarks(c: &mut Criterion) {
                 bench_parallel_thread_scaling(c, &loader);
             }
             Err(e) => {
-                eprintln!("Failed to load matrix '{}': {}", matrix_file, e);
+                eprintln!("Failed to load matrix '{}': {}", matrix_path.display(), e);
             }
         }
     }
@@ -234,7 +235,7 @@ fn create_synthetic_benchmark_parallel(c: &mut Criterion) {
         (20000, 0.0005),
     ];
     for (size, density) in matrix_params {
-        let synthetic_loader = SimpleMatrixLoader::create_synthetic(size, size, density);
+        let synthetic_loader = FaerLoader::create_synthetic(size, size, density);
 
         println!(
             "Created synthetic matrix for parallel: {}x{} with {} non-zeros ({:.3}% density)",

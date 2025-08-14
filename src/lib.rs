@@ -4,6 +4,7 @@ use faer::Col;
 use std::cmp::min;
 use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
+use std::time::Instant;
 use std::{sync::Arc, thread};
 
 use faer::{
@@ -27,8 +28,8 @@ pub mod test_utils;
 //const K_CAP: usize = 2048; // ~24KB chunk payload
 const B_ROWS: usize = 16 * 1024;
 const K_CAP: usize = 1024;
-const WS_CHUNKS_PER_THREAD: usize = 200; // how many chunks to put in the chunk pool
-const CHUNK_BLOCK: usize = 5; // how many chunks to buffer in communication
+const WS_CHUNKS_PER_THREAD: usize = 1000; // how many chunks to put in the chunk pool
+const CHUNK_BLOCK: usize = 10; // how many chunks to buffer in communication
 
 pub struct SparseDenseStrategy {
     thread_cols: Vec<usize>,
@@ -652,7 +653,6 @@ fn par_sparse_dense<I: Index, T: ComplexField>(
     });
 }
 
-/*
 pub fn dense_sparse_matmul<I: Index, T: ComplexField>(
     dst: MatMut<'_, T>,
     beta: Accum,
@@ -672,7 +672,17 @@ pub fn dense_sparse_matmul<I: Index, T: ComplexField>(
                 unimplemented!();
             } else {
                 for (dst, lhs) in dst.row_iter_mut().zip(lhs.row_iter()) {
-                    par_dense_sparse(dst, beta, lhs, rhs, &alpha, n_threads, strategy, stack);
+                    let mut dst = dst;
+                    par_dense_sparse(
+                        dst.rb_mut(),
+                        beta,
+                        lhs,
+                        rhs,
+                        &alpha,
+                        n_threads,
+                        strategy,
+                        stack,
+                    );
                 }
             }
         }
@@ -687,81 +697,114 @@ fn par_dense_sparse<I: Index, T: ComplexField>(
     alpha: &T,
     n_threads: usize,
     strategy: &SparseDenseStrategy,
-    stack: &mut MemStack,
+    _stack: &mut MemStack,
 ) {
+    /*
     let global_counter: usize = strategy
         .thread_cols
         .iter()
         .zip(strategy.thread_cols.iter().skip(1))
         .map(|(start, end)| 1 + end - start)
         .sum();
+    */
 
-    let (mut work, _) = temp_mat_zeroed::<T, _, _>(global_counter, 1, stack);
-    let work = work.as_mat_mut();
-    let work = work.rb();
+    //let (mut work, _) = temp_mat_zeroed::<T, _, _>(global_counter, 1, stack);
+    //let work = work.as_mat_mut();
+    //let work = work.rb();
     let (rhs_symbolic, rhs_values) = rhs.parts();
     let row_indices = rhs_symbolic.row_idx();
 
     let mut dst = dst;
+    if let Accum::Replace = beta {
+        dst.fill(zero());
+    }
+
+    //println!();
 
     thread::scope(|s| {
+        let dst = dst.rb();
+        let mut handles = Vec::with_capacity(n_threads);
         for tid in 0..n_threads {
-            let arc_dst = arc_dst.clone();
-            let _handle = s.spawn(move || {
-                // find the starting index of this thread's workspace
-                // TODO probably want to just save this info (along with total) in `strategy` because it's
-                // recomputed a lot
-                let counter: usize = strategy
-                    .thread_cols
-                    .iter()
-                    .take(tid)
-                    .zip(strategy.thread_cols.iter().skip(1))
-                    .map(|(start, end)| 1 + end - start)
-                    .sum();
-
+            let handle = s.spawn(move || {
+                //let start_time = Instant::now();
                 let col_start = strategy.thread_cols[tid];
                 let col_end = strategy.thread_cols[tid + 1];
                 let idx_start = strategy.thread_indptrs[tid];
                 let idx_end = strategy.thread_indptrs[tid + 1];
 
-                let thread_workspace_size = 1 + col_end - col_start;
-
-                // SAFETY each thread gets its own (non-overlapping) workspace subvector based on row partitions
+                // SAFETY: each thread gets 2 workspace values. Could probably just return these as
+                // tuple...
+                /*
                 let mut work = unsafe {
                     work.col(0)
                         .const_cast()
                         .try_as_col_major_mut()
                         .unwrap()
-                        .subrows_mut(counter, thread_workspace_size)
+                        .subrows_mut(n_threads * 2, 2)
                 };
+                */
+                // SAFETY: the ranges (col_start+1)..col_end are non-overlapping per thread
+                let mut dst_owned = unsafe { dst.const_cast() };
 
-                for (work_idx, j) in (col_start..=col_end).enumerate() {
-                    let mut col_range = rhs_symbolic.col_range(j);
-                    if j == col_start {
-                        col_range.start = idx_start;
+                let mut left_contrib = T::zero_impl();
+                let mut right_contrib = T::zero_impl();
+                if col_start == col_end {
+                    for idx in col_start..col_end {
+                        let k = row_indices[idx].zx();
+                        let lhs_k = lhs[k].mul_by_ref(alpha);
+                        let rhs_kj = &rhs_values[idx];
+                        //work[0] = work[0].add_by_ref(&lhs_k.mul_by_ref(&rhs_kj));
+                        left_contrib = left_contrib.add_by_ref(&lhs_k.mul_by_ref(&rhs_kj));
                     }
-                    if j == col_end {
-                        col_range.end = idx_end;
-                    }
+                } else {
+                    let mut col_range = rhs_symbolic.col_range(col_start);
+                    col_range.start = idx_start;
                     for idx in col_range {
                         let k = row_indices[idx].zx();
                         let lhs_k = lhs[k].mul_by_ref(alpha);
                         let rhs_kj = &rhs_values[idx];
-                        work[work_idx] = work[work_idx].add_by_ref(&lhs_k.mul_by_ref(&rhs_kj));
+                        left_contrib = left_contrib.add_by_ref(&lhs_k.mul_by_ref(&rhs_kj));
+                    }
+
+                    for j in col_start + 1..col_end {
+                        for idx in rhs_symbolic.col_range(j) {
+                            let k = row_indices[idx].zx();
+                            let lhs_k = lhs[k].mul_by_ref(alpha);
+                            let rhs_kj = &rhs_values[idx];
+                            dst_owned[j] = dst_owned[j].add_by_ref(&lhs_k.mul_by_ref(&rhs_kj));
+                        }
+                    }
+
+                    let mut col_range = rhs_symbolic.col_range(col_end);
+                    col_range.end = idx_end;
+                    for idx in col_range {
+                        let k = row_indices[idx].zx();
+                        let lhs_k = lhs[k].mul_by_ref(alpha);
+                        let rhs_kj = &rhs_values[idx];
+                        right_contrib = right_contrib.add_by_ref(&lhs_k.mul_by_ref(&rhs_kj));
                     }
                 }
-
-                let mut dst = arc_dst.lock();
-                for (offset, val) in work.iter().enumerate() {
-                    let dst_col = col_start + offset;
-                    dst[dst_col] = dst[dst_col].add_by_ref(val);
-                }
+                //let end_time = Instant::now();
+                //println!("{}: {:?}", tid, end_time.duration_since(start_time));
+                (left_contrib, right_contrib)
             });
+            handles.push(handle);
         }
 
-        if let Accum::Replace = beta {
-            dst.fill(zero());
+        let stitch: Vec<(T, T)> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        //let work = work.col(0);
+        // SAFETY: all workers have been joined so root thread is only one with access
+        let mut dst = unsafe { dst.const_cast() };
+        //for tid in 0..n_threads {
+        for (tid, (left_v, right_v)) in stitch.iter().enumerate() {
+            let left = strategy.thread_cols[tid];
+            let right = strategy.thread_cols[tid + 1];
+            //let work_idx = tid * 2;
+            //let left_v = &work[work_idx];
+            //let right_v = &work[work_idx + 1];
+            dst[left] = dst[left].add_by_ref(left_v);
+            dst[right] = dst[right].add_by_ref(right_v);
         }
     });
 }
-*/
