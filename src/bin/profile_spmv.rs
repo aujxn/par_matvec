@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 
 use faer::{Accum, Par};
 
-use par_matvec::{
-    SparseDenseStrategy, sparse_dense_matmul, sparse_dense_scratch, test_utils::FaerLoader,
-};
+use par_matvec::sparse_dense_impl::buffer_foreign::{par_sparse_dense, sparse_dense_scratch};
+use par_matvec::spmv_drivers::{SpMvStrategy, sparse_dense_matmul};
+use par_matvec::test_utils::FaerLoader;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         Par::Rayon(std::num::NonZeroUsize::new(num_threads).unwrap())
     };
-    let strategy = SparseDenseStrategy::new(matrix.symbolic(), par);
+    let strategy = SpMvStrategy::new(matrix.symbolic(), par);
 
     let stack_req = sparse_dense_scratch(matrix, rhs, &strategy, par);
     let mut stack_buffer = faer::dyn_stack::MemBuffer::try_new(stack_req).unwrap();
@@ -69,6 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             par,
             &strategy,
             &mut stack,
+            par_sparse_dense,
         );
         iterations += 1;
     }
@@ -89,4 +90,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

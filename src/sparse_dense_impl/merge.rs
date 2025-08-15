@@ -7,18 +7,13 @@ use std::collections::BinaryHeap;
 use std::thread;
 
 use faer::{
-    Accum, ColMut, ColRef, Index, MatMut, MatRef, Par, RowMut, RowRef,
-    dyn_stack::{MemStack, StackReq},
-    linalg::temp_mat_scratch,
-    prelude::{Reborrow, ReborrowMut},
-    sparse::{
-        SparseColMatRef, SymbolicSparseColMatRef,
-        linalg::matmul::{
-            dense_sparse_matmul as seq_dense_sparse, sparse_dense_matmul as seq_sparse_dense,
-        },
-    },
+    Accum, ColMut, ColRef, Index,
+    dyn_stack::MemStack,
+    sparse::SparseColMatRef,
     traits::{ComplexField, math_utils::zero},
 };
+
+use crate::spmv_drivers::SpMvStrategy;
 
 // (row, val, local column index)
 struct HeapEntry<T: ComplexField>(usize, T, usize);
@@ -53,7 +48,7 @@ pub fn par_sparse_dense<I: Index, T: ComplexField>(
     rhs: ColRef<'_, T>,
     alpha: &T,
     n_threads: usize,
-    strategy: &SparseDenseStrategy,
+    strategy: &SpMvStrategy,
     _stack: &mut MemStack,
 ) {
     let m = lhs.nrows();

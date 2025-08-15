@@ -1,25 +1,21 @@
 //! Most simple algorithm which creates a `dst` workspace for each thread and then sums them
 //! all in parallel at the end.
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
 use std::thread;
 
 use faer::{
-    Accum, ColMut, ColRef, Index, MatMut, MatRef, Par, RowMut, RowRef,
-    dyn_stack::{MemStack, StackReq},
-    linalg::temp_mat_scratch,
+    Accum, ColMut, ColRef, Index, MatRef,
+    col::AsColMut,
+    dyn_stack::MemStack,
+    linalg::temp_mat_zeroed,
+    mat::AsMatMut,
     prelude::{Reborrow, ReborrowMut},
-    sparse::{
-        SparseColMatRef, SymbolicSparseColMatRef,
-        linalg::matmul::{
-            dense_sparse_matmul as seq_dense_sparse, sparse_dense_matmul as seq_sparse_dense,
-        },
-    },
+    sparse::SparseColMatRef,
     traits::{ComplexField, math_utils::zero},
 };
 
-use faer::{col::AsColMut, linalg::temp_mat_zeroed, mat::AsMatMut};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+
+use crate::spmv_drivers::SpMvStrategy;
 
 #[inline]
 fn hot_loop<I: Index, T: ComplexField>(
@@ -43,7 +39,7 @@ pub fn par_sparse_dense<I: Index, T: ComplexField>(
     rhs: ColRef<'_, T>,
     alpha: &T,
     n_threads: usize,
-    strategy: &SparseDenseStrategy,
+    strategy: &SpMvStrategy,
     stack: &mut MemStack,
 ) {
     let m = lhs.nrows();
