@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 
 use faer::{
     Mat,
@@ -30,21 +30,19 @@ pub fn large_matrix_paths() -> impl Iterator<Item = PathBuf> {
 
 /// Helper function to get matrix paths within a nnz range
 fn matrix_paths_in_range(min_nnz: usize, max_nnz: usize) -> impl Iterator<Item = PathBuf> {
-    get_all_matrix_paths()
-        .into_iter()
-        .filter(move |path| {
-            if let Ok(nnz) = get_matrix_nnz(path) {
-                nnz >= min_nnz && nnz < max_nnz
-            } else {
-                false
-            }
-        })
+    get_all_matrix_paths().into_iter().filter(move |path| {
+        if let Ok(nnz) = get_matrix_nnz(path) {
+            nnz >= min_nnz && nnz < max_nnz
+        } else {
+            false
+        }
+    })
 }
 
 /// Get all matrix file paths from test_matrices directory
 fn get_all_matrix_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    
+
     // Add files from main test_matrices directory
     if let Ok(entries) = fs::read_dir("test_matrices") {
         for entry in entries {
@@ -56,7 +54,7 @@ fn get_all_matrix_paths() -> Vec<PathBuf> {
             }
         }
     }
-    
+
     // Add files from suitesparse subdirectory
     if let Ok(entries) = fs::read_dir("test_matrices/suitesparse") {
         for entry in entries {
@@ -68,7 +66,7 @@ fn get_all_matrix_paths() -> Vec<PathBuf> {
             }
         }
     }
-    
+
     paths.sort();
     paths
 }
@@ -78,7 +76,7 @@ fn get_matrix_nnz(path: &Path) -> Result<usize, Box<dyn std::error::Error>> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
     let mut line = String::new();
-    
+
     // Skip comment lines starting with %
     loop {
         line.clear();
@@ -87,32 +85,40 @@ fn get_matrix_nnz(path: &Path) -> Result<usize, Box<dyn std::error::Error>> {
             break;
         }
     }
-    
+
     // Parse the header line: rows cols nnz
     let parts: Vec<&str> = line.trim().split_whitespace().collect();
     if parts.len() < 3 {
         return Err(format!("Invalid Matrix Market header: {}", line.trim()).into());
     }
-    
+
     let nnz = parts[2].parse::<usize>()?;
     Ok(nnz)
 }
 
 /// Convert matrix_market_rs MtxData to nalgebra CooMatrix
-fn mtx_data_to_nalgebra_coo(mtx_data: matrix_market_rs::MtxData<f64, 2>) -> Result<CooMatrix<f64>, Box<dyn std::error::Error>> {
+fn mtx_data_to_nalgebra_coo(
+    mtx_data: matrix_market_rs::MtxData<f64, 2>,
+) -> Result<CooMatrix<f64>, Box<dyn std::error::Error>> {
     let (nrows, ncols, coord, val) = match mtx_data {
         matrix_market_rs::MtxData::Sparse([nrows, ncols], coord, val, _symmetry) => {
             (nrows, ncols, coord, val)
-        },
+        }
         _ => {
             return Err("Only sparse Matrix Market files are supported".into());
         }
     };
-    
+
     let row_indices: Vec<usize> = coord.iter().map(|&[row, _col]| row).collect();
     let col_indices: Vec<usize> = coord.iter().map(|&[_row, col]| col).collect();
-    
-    Ok(CooMatrix::try_from_triplets(nrows, ncols, row_indices, col_indices, val)?)
+
+    Ok(CooMatrix::try_from_triplets(
+        nrows,
+        ncols,
+        row_indices,
+        col_indices,
+        val,
+    )?)
 }
 
 /// Test matrices struct with all different format representations
@@ -136,7 +142,8 @@ impl TestMatrices {
         let path = path.as_ref();
         let matrix_name = path.file_stem().unwrap().to_string_lossy().to_string();
 
-        let coo_matrix: CooMatrix<f64> = mtx_data_to_nalgebra_coo(matrix_market_rs::MtxData::<f64, 2>::from_file(path)?)?;
+        let coo_matrix: CooMatrix<f64> =
+            mtx_data_to_nalgebra_coo(matrix_market_rs::MtxData::<f64, 2>::from_file(path)?)?;
 
         let nrows = coo_matrix.nrows();
         let ncols = coo_matrix.ncols();
@@ -258,7 +265,8 @@ impl FaerLoader {
         let path = path.as_ref();
         let matrix_name = path.file_stem().unwrap().to_string_lossy().to_string();
 
-        let coo_matrix: CooMatrix<f64> = mtx_data_to_nalgebra_coo(matrix_market_rs::MtxData::<f64, 2>::from_file(path)?)?;
+        let coo_matrix: CooMatrix<f64> =
+            mtx_data_to_nalgebra_coo(matrix_market_rs::MtxData::<f64, 2>::from_file(path)?)?;
 
         let nrows = coo_matrix.nrows();
         let ncols = coo_matrix.ncols();
