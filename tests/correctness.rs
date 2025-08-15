@@ -3,9 +3,11 @@ use std::num::NonZero;
 use faer::{Mat, Par};
 use nalgebra::DVector;
 
-use par_matvec::test_utils::{small_matrix_paths, TestMatrices};
 use par_matvec::{
-    SparseDenseStrategy, dense_sparse_matmul, sparse_dense_matmul, sparse_dense_scratch,
+    dense_sparse_impl::{dense_sparse_scratch, par_dense_sparse},
+    sparse_dense_impl::{buffer_foreign, merge, simple},
+    spmv_drivers::{SpMvStrategy, dense_sparse_matmul, sparse_dense_matmul},
+    test_utils::{TestMatrices, small_matrix_paths},
 };
 
 /// Tolerance for floating point comparisons
@@ -180,38 +182,62 @@ fn test_parallel_implementations(
             };
 
             let mut parallel_output = Mat::zeros(matrices.nrows, 1);
-            let strategy = SparseDenseStrategy::new(matrices.faer_csc.symbolic(), par);
+            let strategy = SpMvStrategy::new(matrices.faer_csc.symbolic(), par);
 
-            let stack_req = sparse_dense_scratch(
-                matrices.faer_csc.as_ref(),
-                matrices.rhs_vector.as_ref(),
-                &strategy,
-                par,
-            );
+            let names = ["simple", "merge", "buffer_foreign"];
+            let scratch_fns = [
+                simple::sparse_dense_scratch,
+                merge::sparse_dense_scratch,
+                buffer_foreign::sparse_dense_scratch,
+            ];
+            let par_matvec_fns = [
+                simple::par_sparse_dense,
+                merge::par_sparse_dense,
+                buffer_foreign::par_sparse_dense,
+            ];
+
+            for (name, (sparse_dense_scratch, par_impl)) in names
+                .iter()
+                .zip(scratch_fns.iter().zip(par_matvec_fns.iter()))
+            {
+                let stack_req = sparse_dense_scratch(
+                    matrices.faer_csc.as_ref(),
+                    matrices.rhs_vector.as_ref(),
+                    &strategy,
+                    par,
+                );
+                let mut stack_buffer = faer::dyn_stack::MemBuffer::try_new(stack_req)?;
+                let mut stack = faer::dyn_stack::MemStack::new(&mut stack_buffer);
+
+                sparse_dense_matmul(
+                    parallel_output.as_mut(),
+                    faer::Accum::Replace,
+                    matrices.faer_csc.as_ref(),
+                    matrices.rhs_vector.as_ref(),
+                    1.0,
+                    par,
+                    &strategy,
+                    &mut stack,
+                    Some(*par_impl),
+                );
+
+                assert!(
+                    vectors_are_equal(
+                        &sparse_dense_reference_output,
+                        &parallel_output,
+                        RELATIVE_TOLERANCE,
+                        ABSOLUTE_TOLERANCE
+                    ),
+                    "Parallel sparse-dense {} implementation with {} threads differs from reference",
+                    name,
+                    num_threads
+                );
+            }
+
+            let stack_req =
+                dense_sparse_scratch(lhs_vector, matrices.faer_csc.as_ref(), &strategy, par);
             let mut stack_buffer = faer::dyn_stack::MemBuffer::try_new(stack_req)?;
             let mut stack = faer::dyn_stack::MemStack::new(&mut stack_buffer);
-
-            sparse_dense_matmul(
-                parallel_output.as_mut(),
-                faer::Accum::Replace,
-                matrices.faer_csc.as_ref(),
-                matrices.rhs_vector.as_ref(),
-                1.0,
-                par,
-                &strategy,
-                &mut stack,
-            );
-
-            assert!(
-                vectors_are_equal(
-                    &sparse_dense_reference_output,
-                    &parallel_output,
-                    RELATIVE_TOLERANCE,
-                    ABSOLUTE_TOLERANCE
-                ),
-                "Parallel sparse-dense implementation with {} threads differs from reference",
-                num_threads
-            );
 
             let mut parallel_output = Mat::zeros(1, matrices.nrows);
             dense_sparse_matmul(
@@ -223,6 +249,7 @@ fn test_parallel_implementations(
                 par,
                 &strategy,
                 &mut stack,
+                Some(par_dense_sparse),
             );
 
             assert!(
@@ -282,13 +309,17 @@ fn test_matrix_market_files() {
             println!("\nTesting matrix file: {}", matrix_path.display());
             match TestMatrices::load_from_matrix_market(&matrix_path, 1) {
                 Ok(matrices) => {
-                    test_sequential_implementations(&matrices)
-                        .expect(&format!("Sequential tests failed on {}", matrix_path.display()));
+                    test_sequential_implementations(&matrices).expect(&format!(
+                        "Sequential tests failed on {}",
+                        matrix_path.display()
+                    ));
 
                     // Only test parallel if matrix has enough non-zeros
                     if matrices.nnz > 1000 {
-                        test_parallel_implementations(&matrices)
-                            .expect(&format!("Parallel tests failed on {}", matrix_path.display()));
+                        test_parallel_implementations(&matrices).expect(&format!(
+                            "Parallel tests failed on {}",
+                            matrix_path.display()
+                        ));
                     } else {
                         println!(
                             "  Skipping parallel test (too few non-zeros: {})",
@@ -297,7 +328,11 @@ fn test_matrix_market_files() {
                     }
                 }
                 Err(e) => {
-                    panic!("Failed to load matrix market file {}: {}", matrix_path.display(), e);
+                    panic!(
+                        "Failed to load matrix market file {}: {}",
+                        matrix_path.display(),
+                        e
+                    );
                 }
             }
         } else {

@@ -17,6 +17,7 @@ pub fn dense_sparse_scratch<I: Index, T: ComplexField>(
     par: Par,
 ) -> StackReq {
     let _ = rhs;
+    let _ = strategy;
     match par {
         Par::Seq => StackReq::empty(),
         Par::Rayon(n_threads) => {
@@ -25,13 +26,8 @@ pub fn dense_sparse_scratch<I: Index, T: ComplexField>(
             if dim >= n_threads * 4 {
                 StackReq::empty()
             } else {
-                let counter = strategy
-                    .thread_cols
-                    .iter()
-                    .zip(strategy.thread_cols.iter().skip(1))
-                    .map(|(start, end)| 1 + end - start)
-                    .sum();
-                StackReq::new::<T>(counter)
+                // TODO: actually use ws in impl...
+                StackReq::new::<T>(n_threads * 2)
             }
         }
     }

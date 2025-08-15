@@ -16,14 +16,14 @@ use faer::{
 use crate::spmv_drivers::SpMvStrategy;
 
 // Cache dependent constants
-//const B_ROWS: usize = 32 * 1024; // 32k rows ~ 256KB of y at f64
-//const K_CAP: usize = 2048; // ~24KB chunk payload
-const B_ROWS: usize = 16 * 1024;
-const K_CAP: usize = 1024;
+//pub(crate) const B_ROWS: usize = 32 * 1024; // 32k rows ~ 256KB of y at f64
+//pub(crate) const K_CAP: usize = 2048; // ~24KB chunk payload
+pub(crate) const B_ROWS: usize = 16 * 1024;
+pub(crate) const K_CAP: usize = 1024;
 
 // Communication management constants
-const WS_CHUNKS_PER_THREAD: usize = 1000; // how many chunks to put in the chunk pool
-const CHUNK_BLOCK: usize = 10; // how many chunks to buffer in communication
+pub(crate) const WS_CHUNKS_PER_THREAD: usize = 1000; // how many chunks to put in the chunk pool
+pub(crate) const CHUNK_BLOCK: usize = 10; // how many chunks to buffer in communication
 
 pub fn sparse_dense_scratch<I: Index, T: ComplexField>(
     lhs: SparseColMatRef<'_, I, T>,
@@ -42,12 +42,16 @@ pub fn sparse_dense_scratch<I: Index, T: ComplexField>(
                 StackReq::empty()
             } else {
                 // TODO: probably should scale `WS_CHUNKS_PER_THREAD` using some function of nnz,
-                // density, and dimensions?
+                // density, and dimensions? Also there are still many allocating data structures in
+                // current implementation. Generally they are small allocations though so removing
+                // them isn't worth the work right now, the large / often allocations for the
+                // chunks is avoided by using this stack.
                 StackReq::new::<(usize, T)>(K_CAP * n_threads * WS_CHUNKS_PER_THREAD)
             }
         }
     }
 }
+
 /// A spill chunk. We batch contributions targeting a single row-block.
 #[derive(Debug)]
 struct Chunk<'a, T: ComplexField> {
@@ -325,8 +329,6 @@ fn buffer_foreign<'a, T: ComplexField>(
     }
 }
 
-// NOTE: This merge based algorithm requires row indices to be in sorted order over columns, a soft
-// invariant in faer.
 pub fn par_sparse_dense<I: Index, T: ComplexField>(
     dst: ColMut<'_, T>,
     beta: Accum,

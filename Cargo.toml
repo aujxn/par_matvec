@@ -23,8 +23,15 @@ sprs = "0.11.3"
 criterion = "0.5"
 
 [[bench]]
-name = "sparse_matvec"
+name = "sequential"
 harness = false
+
+[[bench]]
+name = "parallel"
+harness = false
+
+[[test]]
+name = "correctness"
 
 [profile.release]
 debug = true

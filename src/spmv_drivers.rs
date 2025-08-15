@@ -70,7 +70,7 @@ impl SpMvStrategy {
     }
 }
 
-type SparseDenseImpl<I, T> = fn(
+pub type SparseDenseImplFn<I, T> = fn(
     dst: ColMut<'_, T>,
     beta: Accum,
     lhs: SparseColMatRef<'_, I, T>,
@@ -81,7 +81,7 @@ type SparseDenseImpl<I, T> = fn(
     stack: &mut MemStack,
 );
 
-type DenseSparseImpl<I, T> = fn(
+pub type DenseSparseImplFn<I, T> = fn(
     dst: RowMut<'_, T>,
     beta: Accum,
     lhs: RowRef<'_, T>,
@@ -101,7 +101,7 @@ pub fn sparse_dense_matmul<I: Index, T: ComplexField>(
     par: Par,
     strategy: &SpMvStrategy,
     stack: &mut MemStack,
-    par_impl: Option<SparseDenseImpl<I, T>>,
+    par_impl: Option<SparseDenseImplFn<I, T>>,
 ) {
     match par {
         Par::Seq => seq_sparse_dense(dst, beta, lhs, rhs, alpha, par),
@@ -130,7 +130,7 @@ pub fn dense_sparse_matmul<I: Index, T: ComplexField>(
     par: Par,
     strategy: &SpMvStrategy,
     stack: &mut MemStack,
-    par_impl: Option<DenseSparseImpl<I, T>>,
+    par_impl: Option<DenseSparseImplFn<I, T>>,
 ) {
     match par {
         Par::Seq => seq_dense_sparse(dst, beta, lhs, rhs, alpha, par),

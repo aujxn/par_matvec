@@ -3,10 +3,10 @@
 use std::thread;
 
 use faer::{
-    Accum, ColMut, ColRef, Index, MatRef,
+    Accum, ColMut, ColRef, Index, MatRef, Par,
     col::AsColMut,
-    dyn_stack::MemStack,
-    linalg::temp_mat_zeroed,
+    dyn_stack::{MemStack, StackReq},
+    linalg::{temp_mat_scratch, temp_mat_zeroed},
     mat::AsMatMut,
     prelude::{Reborrow, ReborrowMut},
     sparse::SparseColMatRef,
@@ -16,6 +16,28 @@ use faer::{
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
 use crate::spmv_drivers::SpMvStrategy;
+
+pub fn sparse_dense_scratch<I: Index, T: ComplexField>(
+    lhs: SparseColMatRef<'_, I, T>,
+    rhs: MatRef<'_, T>,
+    strategy: &SpMvStrategy,
+    par: Par,
+) -> StackReq {
+    let _ = lhs;
+    let _ = strategy;
+    match par {
+        Par::Seq => StackReq::empty(),
+        Par::Rayon(n_threads) => {
+            let dim = rhs.ncols();
+            let n_threads = n_threads.get();
+            if dim >= n_threads * 4 {
+                StackReq::empty()
+            } else {
+                temp_mat_scratch::<T>(rhs.nrows(), n_threads)
+            }
+        }
+    }
+}
 
 #[inline]
 fn hot_loop<I: Index, T: ComplexField>(

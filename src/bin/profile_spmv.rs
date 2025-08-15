@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             par,
             &strategy,
             &mut stack,
-            par_sparse_dense,
+            Some(par_sparse_dense),
         );
         iterations += 1;
     }

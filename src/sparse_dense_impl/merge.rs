@@ -7,13 +7,37 @@ use std::collections::BinaryHeap;
 use std::thread;
 
 use faer::{
-    Accum, ColMut, ColRef, Index,
-    dyn_stack::MemStack,
+    Accum, ColMut, ColRef, Index, MatRef, Par,
+    dyn_stack::{MemStack, StackReq},
     sparse::SparseColMatRef,
     traits::{ComplexField, math_utils::zero},
 };
 
 use crate::spmv_drivers::SpMvStrategy;
+
+pub fn sparse_dense_scratch<I: Index, T: ComplexField>(
+    lhs: SparseColMatRef<'_, I, T>,
+    rhs: MatRef<'_, T>,
+    strategy: &SpMvStrategy,
+    par: Par,
+) -> StackReq {
+    let _ = lhs;
+    let _ = strategy;
+    match par {
+        Par::Seq => StackReq::empty(),
+        Par::Rayon(n_threads) => {
+            let dim = rhs.ncols();
+            let n_threads = n_threads.get();
+            if dim >= n_threads * 4 {
+                StackReq::empty()
+            } else {
+                // TODO: Current impl uses allocating data structures... should use pre-allocated
+                // workspace. Only worth doing though if this algorithm gets many improvements.
+                StackReq::empty()
+            }
+        }
+    }
+}
 
 // (row, val, local column index)
 struct HeapEntry<T: ComplexField>(usize, T, usize);
