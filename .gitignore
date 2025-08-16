@@ -4,3 +4,4 @@ CLAUDE.md
 perf*
 flamegraph.svg
 /venv
+/logs

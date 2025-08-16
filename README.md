@@ -8,7 +8,13 @@ This crate studies the performance of different sparse matrix by dense vector pr
 
 ## Quick Start
 
+Running the benchmarks and tests will require some `matrix_market` format files located in `test_matrices/**/<mat_name>.mtx`. The testing / benching utility walks this directory to find files. 
+
 ```bash
+# Create some matrices in the expected locations
+mkdir test_matrices
+ln -s <matrix_market_file> test_matrices/<name>.mtx
+
 # Run all benchmarks
 cargo bench
 # or run individual benches
@@ -18,7 +24,8 @@ cargo bench --bench parallel
 # Run tests
 cargo test
 
-# Generate results tables, updates `BENCHMARK_RESULTS.md`
+# (requires `matplotlib` and both sequential and parallel benches to have been run)
+# Generate results tables, updates `BENCHMARK_RESULTS.md` 
 python3 parse_criterion_benchmarks.py
 
 # Profile algorithm with flamegraph (input matrix market file path)
