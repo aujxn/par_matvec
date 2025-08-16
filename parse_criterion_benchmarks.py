@@ -218,6 +218,15 @@ def generate_sequential_table(results: List[BenchmarkResult], operation: str) ->
         first_impl = next(iter(implementations.values()))
         row = [f"**{matrix_name}**", first_impl.dimensions, f"{first_impl.nnz:,}"]
         
+        # Find the best (fastest) implementation for this matrix
+        best_time = float('inf')
+        best_impl = None
+        for impl in ['faer', 'nalgebra', 'sprs']:
+            if impl in implementations:
+                if implementations[impl].median_ns < best_time:
+                    best_time = implementations[impl].median_ns
+                    best_impl = impl
+        
         for impl in ['faer', 'nalgebra', 'sprs']:
             if impl in implementations:
                 result = implementations[impl]
@@ -225,6 +234,10 @@ def generate_sequential_table(results: List[BenchmarkResult], operation: str) ->
                 std_val, std_unit = format_time_with_unit(result.std_dev_ns)
                 
                 cell = f"{time_val:.2f} {t_unit} ± {std_val:.2f} {std_unit}"
+                
+                # Bold the winning entry
+                if impl == best_impl:
+                    cell = f"**{cell}**"
                 
                 row.append(cell)
             else:
@@ -240,11 +253,11 @@ def generate_parallel_table(results: List[BenchmarkResult], algorithm: str, oper
     if operation == "dense_sparse":
         parallel_results = [r for r in results if r.group_id.startswith("thread_scaling_") and 
                           r.threads is not None and r.algorithm == algorithm]
-        title = f"Parallel Thread Scaling Results - Dense-Sparse Multiplication ({algorithm.title()})"
+        title = f"Parallel Thread Scaling Results - Dense-Sparse Multiplication (`{algorithm}`)"
     else:
         parallel_results = [r for r in results if r.group_id.startswith("thread_scaling_") and 
                           r.threads is not None and r.algorithm == algorithm]
-        title = f"Parallel Thread Scaling Results - Sparse-Dense Multiplication ({algorithm.title()})"
+        title = f"Parallel Thread Scaling Results - Sparse-Dense Multiplication (`{algorithm}`)"
     
     # Group by matrix name, then by thread count
     matrix_groups = {}
@@ -282,6 +295,15 @@ def generate_parallel_table(results: List[BenchmarkResult], algorithm: str, oper
         first_result = next(iter(thread_results.values()))
         row = [f"**{matrix_name}**", first_result.dimensions, f"{first_result.nnz:,}"]
         
+        # Find the best (fastest) thread count for this matrix
+        best_time = float('inf')
+        best_thread_count = None
+        for thread_count in sorted_threads:
+            if thread_count in thread_results:
+                if thread_results[thread_count].median_ns < best_time:
+                    best_time = thread_results[thread_count].median_ns
+                    best_thread_count = thread_count
+        
         for thread_count in sorted_threads:
             if thread_count in thread_results:
                 result = thread_results[thread_count]
@@ -293,6 +315,10 @@ def generate_parallel_table(results: List[BenchmarkResult], algorithm: str, oper
                     cell = f"{time_val:.2f} µs"
                 else:  # ms
                     cell = f"{time_val:.3f} ms"
+                
+                # Bold the winning entry
+                if thread_count == best_thread_count:
+                    cell = f"**{cell}**"
                 
                 row.append(cell)
             else:
