@@ -39,34 +39,49 @@ fn matrix_paths_in_range(min_nnz: usize, max_nnz: usize) -> impl Iterator<Item =
     })
 }
 
-/// Get all matrix file paths from test_matrices directory
+/// Get all matrix file paths from test_matrices directory and all subdirectories
 pub fn get_all_matrix_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    if let Ok(entries) = fs::read_dir("test_matrices") {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("mtx") {
-                    paths.push(path);
-                }
-            }
-        }
-    }
-
-    if let Ok(entries) = fs::read_dir("test_matrices/suitesparse") {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("mtx") {
-                    paths.push(path);
-                }
-            }
-        }
+    if let Err(e) = collect_matrix_files_recursive("test_matrices", &mut paths) {
+        eprintln!("Warning: Could not access test_matrices directory: {}", e);
     }
 
     paths.sort();
+
+    eprintln!("Found {} matrix files:", paths.len());
+    for path in &paths {
+        eprintln!("  {}", path.display());
+    }
+
     paths
+}
+
+/// Recursively collect .mtx files from a directory and its subdirectories
+fn collect_matrix_files_recursive<P: AsRef<Path>>(
+    dir: P,
+    paths: &mut Vec<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let entries = fs::read_dir(&dir)?;
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            if let Err(e) = collect_matrix_files_recursive(&path, paths) {
+                eprintln!(
+                    "Warning: Could not access directory {}: {}",
+                    path.display(),
+                    e
+                );
+            }
+        } else if path.extension().and_then(|s| s.to_str()) == Some("mtx") {
+            paths.push(path);
+        }
+    }
+
+    Ok(())
 }
 
 /// Get the number of non-zeros for a matrix file by reading only the header
