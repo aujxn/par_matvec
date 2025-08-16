@@ -43,7 +43,7 @@ See `BENCHMARK_RESULTS.md` for table summary of the benchmarks.
 
 ### Sequential
 
-`sprs` and `faer` seem about the same performance-wise, with `nalgebra` generally taking 20% - 50% longer for each matrix SpMV. 
+I don't fully trust the accuracy of these results right now for a few reasons... Differences in the APIs make it difficult to directly compare them. `faer` definitelly exposes the most flexible and expressive (single) API, though. The current version of this bench doesn't provide a pre-allocated output vector for `nalgebra` but does for the other two, so more work is needed here to make this a comprehensive benchmark.
 
 ### Parallel
 
@@ -109,6 +109,33 @@ An alternative approach to the inter-thread communication would be to use atomic
 In the 'easy' case (Alg 1) there is decent scaling and the parallel implementation can be much faster than sequential on general non-pathological cases. The scaling isn't as good as I would hope given the near-zero synchronization overhead, but maybe there are some obvious optimizations available to improve this simple algorithm.
 
 In the 'hard' case (Alg 2), the simple version 2a shows by far the best results currently for a general approach that works well enough for most problems. 2b and 2c may be better for highly sparse or structured matrices, but they need significant work in their implementations to become remotely competitive and both would likely require a pre-processing stage to reorder the matrix.
+
+## Roadmap
+
+In the order of priority these are my plans for this suite:
+
+### Improve Parallel Implementations
+
+Improve all parallel implementations until they are somewhat competitive with each other. It should be possible for each of these algorithms to at least be an improvement over sequential with some number of threads.
+
+  - `dense_sparse` --- I'm not sure how to improve but the performance *should* be better than it is...
+  - `simple` --- could be slightly improved by writing some values directly to `dst` and not collecting those into the workspaces. There is probably some way to improve the workspace reduction step as well.
+  - `merge` --- would most benefit from replacing the `std::collections::binary_heap` with a custom tournament tree. Also not merging values by implementing the `dst` vector ownership scheme would help lots when matrix is well ordered.
+  - `buffer_foreign` --- could have improved cache performance by using a smaller index type for the local indices and encoding the global index with the `block_id`.
+
+  All 4 could improve by eliminating allocations in these functions and using the pre-allocated workspace. Large / frequent allocations and ones that were easy to implement using `MemStack` are already done but 3 of these still has some dynamically allocated data structures.
+
+### Study Reordering Methods
+
+As stated multiple times, permuting the matrices might help a lot. I'd like to know how much.
+
+### Block Matrix Support
+
+Sparse matrices with block entries will require custom implementation but this is the long term goal of making this repo. I need block sparse matrices for my algebraic multigrid library but scalar needs to work well first.
+
+### GPU Block Matrix Support
+
+Eventually... I hope. Would really like a vendor agnostic rust API for block sparse matrix operations on GPUs for my dissertation but we will see.
 
 ## License
 
