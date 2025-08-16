@@ -80,8 +80,11 @@ macro_rules! generate_sparse_dense_bench {
 
 generate_sparse_dense_bench!(bench_sparse_dense_simple, simple, "simple");
 generate_sparse_dense_bench!(bench_sparse_dense_merge, merge, "merge");
-generate_sparse_dense_bench!(bench_sparse_dense_buffer_foreign, buffer_foreign, "buffer_foreign");
-
+generate_sparse_dense_bench!(
+    bench_sparse_dense_buffer_foreign,
+    buffer_foreign,
+    "buffer_foreign"
+);
 
 fn bench_dense_sparse(c: &mut Criterion, loader: &FaerLoader) {
     let mut group = c.benchmark_group(format!(
@@ -156,8 +159,7 @@ fn bench_parallel_thread_scaling(c: &mut Criterion, loader: &FaerLoader) {
 fn parallel_scaling_benchmarks(c: &mut Criterion) {
     println!("Running parallel thread scaling benchmark...");
 
-    let matrix_paths: Vec<_> = large_matrix_paths().collect();
-    for matrix_path in matrix_paths {
+    for matrix_path in large_matrix_paths() {
         match FaerLoader::load_from_matrix_market(&matrix_path, 1) {
             Ok(loader) => {
                 println!(

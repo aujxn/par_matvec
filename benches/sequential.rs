@@ -1,13 +1,12 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use faer::{Mat, Par};
 use nalgebra::DVector;
-use par_matvec::test_utils::{TestMatrices, small_matrix_paths};
+use par_matvec::test_utils::{TestMatrices, get_all_matrix_paths};
 
 fn sequential_benchmarks(c: &mut Criterion) {
     println!("Running sequential implementations benchmark...");
 
-    let matrix_paths: Vec<_> = small_matrix_paths().collect();
-    for matrix_path in matrix_paths {
+    for matrix_path in get_all_matrix_paths() {
         match TestMatrices::load_from_matrix_market(&matrix_path, 1) {
             Ok(matrices) => {
                 println!(
@@ -15,7 +14,8 @@ fn sequential_benchmarks(c: &mut Criterion) {
                     matrices.matrix_name, matrices.nrows, matrices.ncols, matrices.nnz
                 );
 
-                bench_sequential_implementations(c, &matrices);
+                bench_sequential_sparse_dense_implementations(c, &matrices);
+                bench_sequential_dense_sparse_implementations(c, matrices);
             }
             Err(e) => {
                 eprintln!("Failed to load matrix '{}': {}", matrix_path.display(), e);
@@ -39,12 +39,13 @@ fn create_synthetic_benchmark_sequential(c: &mut Criterion) {
             * 100.0
     );
 
-    bench_sequential_implementations(c, &synthetic_matrices);
+    bench_sequential_sparse_dense_implementations(c, &synthetic_matrices);
+    bench_sequential_dense_sparse_implementations(c, synthetic_matrices);
 }
 
-fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) {
+fn bench_sequential_sparse_dense_implementations(c: &mut Criterion, matrices: &TestMatrices) {
     let mut group = c.benchmark_group(format!(
-        "sequential_matvec_{}-{}x{}_nnz{}",
+        "sequential_sparse_dense_{}-{}x{}_nnz{}",
         matrices.matrix_name, matrices.nrows, matrices.ncols, matrices.nnz
     ));
     group.sample_size(100);
@@ -53,7 +54,6 @@ fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) 
     let rhs_col = matrices.rhs_vector.col(0);
 
     let nalgebra_rhs = DVector::from_iterator(matrices.rhs_vector.nrows(), rhs_col.iter().copied());
-
     let sprs_rhs: Vec<f64> = rhs_col.iter().copied().collect();
     let mut sprs_output = vec![0.0; matrices.nrows];
 
@@ -77,6 +77,7 @@ fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) 
         },
     );
 
+    //let mut result = nalgebra::DVector::zeros(matrices.nrows);
     group.bench_with_input(
         BenchmarkId::new(
             "nalgebra",
@@ -85,7 +86,19 @@ fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) 
         matrices,
         |b, matrices| {
             b.iter(|| {
-                let _result = &matrices.nalgebra_csr * &nalgebra_rhs;
+                let _result = &matrices.nalgebra_csc * &nalgebra_rhs;
+                /* This API may be slightly better since it doesn't have to allocate the result
+                * vector in the benchmark unlike the operator version... But looking at the
+                * implementation I see that even when the first arg `beta` is 0.0 it still scales
+                * the `c` vector by it and accumulates it so there is a lot of wasted operations.
+                nalgebra_sparse::ops::serial::spmm_csc_dense(
+                    0.0,
+                    nalgebra_sparse::ops::Op::NoOp(&matrices.nalgebra_csc),
+                    1.0,
+                    nalgebra_sparse::ops::Op::NoOp(&nalgebra_rhs),
+                    &mut result,
+                );
+                */
             })
         },
     );
@@ -98,9 +111,90 @@ fn bench_sequential_implementations(c: &mut Criterion, matrices: &TestMatrices) 
         matrices,
         |b, matrices| {
             b.iter(|| {
-                sprs::prod::mul_acc_mat_vec_csr(
-                    matrices.sprs_csr.view(),
+                sprs::prod::mul_acc_mat_vec_csc(
+                    matrices.sprs_csc.view(),
                     &sprs_rhs[..],
+                    &mut sprs_output[..],
+                );
+            })
+        },
+    );
+
+    group.finish();
+}
+
+fn bench_sequential_dense_sparse_implementations(c: &mut Criterion, matrices: TestMatrices) {
+    let mut group = c.benchmark_group(format!(
+        "sequential_dense_sparse_{}-{}x{}_nnz{}",
+        matrices.matrix_name, matrices.nrows, matrices.ncols, matrices.nnz
+    ));
+    group.sample_size(100);
+
+    let lhs_mat = matrices.rhs_vector.transpose();
+    let lhs_row = lhs_mat.row(0);
+    let mut faer_output = Mat::zeros(lhs_row.nrows(), matrices.ncols);
+
+    let nalgebra_lhs = DVector::from_iterator(matrices.rhs_vector.nrows(), lhs_row.iter().copied());
+    let sprs_lhs: Vec<f64> = lhs_row.iter().copied().collect();
+    let mut sprs_output = vec![0.0; lhs_row.ncols()];
+
+    // These transpose APIs simply switch the storage type from CSC to CSR
+    // So we bench CSR times dense_vec which is equivalent to faer row dense_vec times CSC
+    let nalgebra_csr = &matrices.nalgebra_csc.transpose_as_csr();
+    let sprs_csr = &matrices.sprs_csc.transpose_into();
+    let faer_csc = &matrices.faer_csc;
+
+    group.bench_function(
+        BenchmarkId::new(
+            "faer",
+            format!("{}x{}_nnz{}", matrices.nrows, matrices.ncols, matrices.nnz),
+        ),
+        |b| {
+            b.iter(|| {
+                faer::sparse::linalg::matmul::dense_sparse_matmul(
+                    faer_output.as_mut(),
+                    faer::Accum::Replace,
+                    lhs_mat.as_ref(),
+                    faer_csc.as_ref(),
+                    1.0,
+                    Par::Seq,
+                );
+            })
+        },
+    );
+
+    //let mut result = nalgebra::DMatrix::zeros(lhs_vector.nrows(), matrices.ncols);
+    group.bench_function(
+        BenchmarkId::new(
+            "nalgebra",
+            format!("{}x{}_nnz{}", matrices.nrows, matrices.ncols, matrices.nnz),
+        ),
+        |b| {
+            b.iter(|| {
+                let _result = nalgebra_csr * &nalgebra_lhs;
+                /* This API may be slightly better with caveat, see `sparse_dense` bench comment.
+                nalgebra_sparse::ops::serial::spmm_csr_dense(
+                    1.0,
+                    nalgebra_sparse::ops::Op::NoOp(&nalgebra_csr),
+                    0.0,
+                    nalgebra_sparse::ops::Op::NoOp(&lhs_nalgebra),
+                    &mut result,
+                );
+                */
+            })
+        },
+    );
+
+    group.bench_function(
+        BenchmarkId::new(
+            "sprs",
+            format!("{}x{}_nnz{}", matrices.nrows, matrices.ncols, matrices.nnz),
+        ),
+        |b| {
+            b.iter(|| {
+                sprs::prod::mul_acc_mat_vec_csr(
+                    sprs_csr.view(),
+                    &sprs_lhs[..],
                     &mut sprs_output[..],
                 );
             })

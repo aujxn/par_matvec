@@ -6,7 +6,7 @@ use faer::{
     Mat,
     sparse::{SparseColMat, Triplet},
 };
-use nalgebra_sparse::{CooMatrix, CsrMatrix};
+use nalgebra_sparse::{CooMatrix, CscMatrix};
 use sprs::{CsMatBase, TriMat};
 
 /// Size thresholds for matrix categorization
@@ -40,10 +40,9 @@ fn matrix_paths_in_range(min_nnz: usize, max_nnz: usize) -> impl Iterator<Item =
 }
 
 /// Get all matrix file paths from test_matrices directory
-fn get_all_matrix_paths() -> Vec<PathBuf> {
+pub fn get_all_matrix_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    // Add files from main test_matrices directory
     if let Ok(entries) = fs::read_dir("test_matrices") {
         for entry in entries {
             if let Ok(entry) = entry {
@@ -55,7 +54,6 @@ fn get_all_matrix_paths() -> Vec<PathBuf> {
         }
     }
 
-    // Add files from suitesparse subdirectory
     if let Ok(entries) = fs::read_dir("test_matrices/suitesparse") {
         for entry in entries {
             if let Ok(entry) = entry {
@@ -100,32 +98,56 @@ fn get_matrix_nnz(path: &Path) -> Result<usize, Box<dyn std::error::Error>> {
 fn mtx_data_to_nalgebra_coo(
     mtx_data: matrix_market_rs::MtxData<f64, 2>,
 ) -> Result<CooMatrix<f64>, Box<dyn std::error::Error>> {
-    let (nrows, ncols, coord, val) = match mtx_data {
-        matrix_market_rs::MtxData::Sparse([nrows, ncols], coord, val, _symmetry) => {
-            (nrows, ncols, coord, val)
+    let (nrows, ncols, coord, val, symmetry) = match mtx_data {
+        matrix_market_rs::MtxData::Sparse([nrows, ncols], coord, val, symmetry) => {
+            (nrows, ncols, coord, val, symmetry)
         }
         _ => {
             return Err("Only sparse Matrix Market files are supported".into());
         }
     };
 
-    let row_indices: Vec<usize> = coord.iter().map(|&[row, _col]| row).collect();
-    let col_indices: Vec<usize> = coord.iter().map(|&[_row, col]| col).collect();
+    let mut row_indices = Vec::new();
+    let mut col_indices = Vec::new();
+    let mut values = Vec::new();
+
+    for (i, &[row, col]) in coord.iter().enumerate() {
+        let value = val[i];
+
+        if value == 0.0 {
+            continue;
+        }
+
+        row_indices.push(row);
+        col_indices.push(col);
+        values.push(value);
+
+        match symmetry {
+            matrix_market_rs::SymInfo::Symmetric => {
+                if row != col {
+                    row_indices.push(col);
+                    col_indices.push(row);
+                    values.push(value);
+                }
+            }
+            matrix_market_rs::SymInfo::General => {}
+        }
+    }
 
     Ok(CooMatrix::try_from_triplets(
         nrows,
         ncols,
         row_indices,
         col_indices,
-        val,
+        values,
     )?)
 }
 
 /// Test matrices struct with all different format representations
 pub struct TestMatrices {
     pub faer_csc: SparseColMat<usize, f64>,
-    pub nalgebra_csr: CsrMatrix<f64>,
-    pub sprs_csr: CsMatBase<f64, usize, Vec<usize>, Vec<usize>, Vec<f64>>,
+    pub nalgebra_csc: CscMatrix<f64>,
+    pub sprs_csc: CsMatBase<f64, usize, Vec<usize>, Vec<usize>, Vec<f64>>,
     pub rhs_vector: Mat<f64>,
     pub matrix_name: String,
     pub nrows: usize,
@@ -149,7 +171,7 @@ impl TestMatrices {
         let ncols = coo_matrix.ncols();
         let nnz = coo_matrix.nnz();
 
-        let nalgebra_csr = CsrMatrix::from(&coo_matrix);
+        let nalgebra_csc = CscMatrix::from(&coo_matrix);
 
         let (row_indices, col_indices, values) = coo_matrix.disassemble();
         let mut sprs_triplet = TriMat::new((nrows, ncols));
@@ -160,7 +182,7 @@ impl TestMatrices {
         {
             sprs_triplet.add_triplet(*row, *col, *val);
         }
-        let sprs_csr = sprs_triplet.to_csr();
+        let sprs_csc = sprs_triplet.to_csc();
 
         let faer_triplets: Vec<Triplet<usize, usize, f64>> = row_indices
             .iter()
@@ -185,8 +207,8 @@ impl TestMatrices {
 
         Ok(TestMatrices {
             faer_csc,
-            nalgebra_csr,
-            sprs_csr,
+            nalgebra_csc,
+            sprs_csc,
             rhs_vector,
             matrix_name,
             nrows,
@@ -220,13 +242,13 @@ impl TestMatrices {
 
         let coo_matrix =
             CooMatrix::try_from_triplets(nrows, ncols, row_indices, col_indices, values).unwrap();
-        let nalgebra_csr = CsrMatrix::from(&coo_matrix);
+        let nalgebra_csc = CscMatrix::from(&coo_matrix);
 
         let mut sprs_triplet = TriMat::new((nrows, ncols));
         for &(row, col, val) in &tuple_triplets {
             sprs_triplet.add_triplet(row, col, val);
         }
-        let sprs_csr = sprs_triplet.to_csr();
+        let sprs_csc = sprs_triplet.to_csc();
 
         let mut rhs_vector = Mat::zeros(ncols, 1);
         for i in 0..ncols {
@@ -235,8 +257,8 @@ impl TestMatrices {
 
         TestMatrices {
             faer_csc,
-            nalgebra_csr,
-            sprs_csr,
+            nalgebra_csc,
+            sprs_csc,
             rhs_vector,
             matrix_name: "synthetic".to_string(),
             nrows,

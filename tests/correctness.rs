@@ -100,7 +100,7 @@ fn test_sequential_implementations(
         matrices.rhs_vector.nrows(),
         matrices.rhs_vector.col(0).iter().copied(),
     );
-    let nalgebra_result = &matrices.nalgebra_csr * &nalgebra_rhs;
+    let nalgebra_result = &matrices.nalgebra_csc * &nalgebra_rhs;
 
     assert!(
         vectors_are_equal(
@@ -115,8 +115,8 @@ fn test_sequential_implementations(
 
     let sprs_rhs: Vec<f64> = matrices.rhs_vector.col(0).iter().copied().collect();
     let mut sprs_output = vec![0.0; matrices.nrows];
-    sprs::prod::mul_acc_mat_vec_csr(
-        matrices.sprs_csr.view(),
+    sprs::prod::mul_acc_mat_vec_csc(
+        matrices.sprs_csc.view(),
         &sprs_rhs[..],
         &mut sprs_output[..],
     );
