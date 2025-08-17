@@ -275,7 +275,7 @@ impl TestMatrices {
             nalgebra_csc,
             sprs_csc,
             rhs_vector,
-            matrix_name: "synthetic".to_string(),
+            matrix_name: format!("synthetic-{}x{}_{:.2}", nrows, ncols, density),
             nrows,
             ncols,
             nnz: triplets.len(),

@@ -55,12 +55,16 @@ def parse_group_id(group_id: str) -> Tuple[str, str, Optional[str]]:
     # "thread_scaling_anisotropy_3d_1r-84315x84315_nnz1394367" -> ("parallel", "anisotropy_3d_1r", "simple")
     
     if group_id.startswith("sequential_sparse_dense_"):
-        parts = group_id.split("-")[0].split("_")
-        matrix_name = parts[3] if len(parts) > 3 else "unknown"
+        # Extract matrix name from after the prefix and before the dash
+        # Format: "sequential_sparse_dense_MATRIX_NAME-dimensions_nnz"
+        prefix_removed = group_id.replace("sequential_sparse_dense_", "")
+        matrix_name = prefix_removed.split("-")[0] if "-" in prefix_removed else prefix_removed
         return "sequential_sparse_dense", matrix_name, None
     elif group_id.startswith("sequential_dense_sparse_"):
-        parts = group_id.split("-")[0].split("_")
-        matrix_name = parts[3] if len(parts) > 3 else "unknown"
+        # Extract matrix name from after the prefix and before the dash
+        # Format: "sequential_dense_sparse_MATRIX_NAME-dimensions_nnz"
+        prefix_removed = group_id.replace("sequential_dense_sparse_", "")
+        matrix_name = prefix_removed.split("-")[0] if "-" in prefix_removed else prefix_removed
         return "sequential_dense_sparse", matrix_name, None
     elif group_id.startswith("thread_scaling_"):
         # Extract matrix name from before the first dash
@@ -390,20 +394,13 @@ def generate_plots(results: List[BenchmarkResult], figures_dir: Path) -> List[st
             print(f"Available matrices: {list(seq_lookup.keys())}")
             
             # Plot sequential baselines as horizontal dotted lines
-            # Try both exact match and fuzzy matching
+            # Use exact string matching only
             seq_data = None
             if matrix_name in seq_lookup and operation in seq_lookup[matrix_name]:
                 seq_data = seq_lookup[matrix_name][operation]
+                print(f"  Found exact match: {matrix_name} for {operation}")
             else:
-                # Try fuzzy matching - look for matrices that contain the parallel matrix name
-                # or vice versa (handles cases where naming might be slightly different)
-                for seq_matrix in seq_lookup.keys():
-                    if (matrix_name in seq_matrix or seq_matrix in matrix_name or 
-                        seq_matrix.replace('_', '').replace('-', '') == matrix_name.replace('_', '').replace('-', '')):
-                        if operation in seq_lookup[seq_matrix]:
-                            seq_data = seq_lookup[seq_matrix][operation]
-                            print(f"  Found fuzzy match: {seq_matrix} -> {matrix_name}")
-                            break
+                print(f"  No sequential baseline found for {matrix_name} in {operation}")
             
             if seq_data:
                 for lib_name, seq_result in seq_data.items():
