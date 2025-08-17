@@ -15,5 +15,9 @@ mkdir -p logs
 export RUST_BACKTRACE=FULL 
 export RUST_LOG=trace
 
+# These shouldn't change very much so no need to rebench
 cargo bench --bench sequential
 cargo bench --bench parallel
+
+module load python
+./venv/bin/python3 parse_criterion_benchmarks.py
