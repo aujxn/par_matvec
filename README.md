@@ -87,7 +87,8 @@ This algorithm/implementation could also be improved using the output partition 
 
  - Computational complexity: `k-way` merge algorithms have a computational complexity of `O(nnz * log(k))` with `k ≈ n / n_threads`; the reduction step here has worst-case complexity of `O(nnz)` in the pathological case of each `A_t` having at most a single non-zero per row.
  - Storage complexity: Worst case is `O(nnz)` for the workspaces.
- - Generally, if `nnz < m * n_threads` or equivalently (as stated in 2a) if `nnz_per_row < n_threads`, this should theoretically be better with a good implementation, but right now it's not even close. The current implementation uses a min-heap approach for the `k-way` merge and a tournament tree would be better, but I'm not sure by how much. Every removal from the heap/tree has to check which column it came from, check which column the previous removal came from and if they match, and do the `log(k)` operations to update the heap/tree.
+ - Generally, if `nnz < m * n_threads` or equivalently (as stated in 2a) if `nnz_per_row < n_threads`, this should theoretically be better with a good implementation, but right now it's not even close. 
+ - Commit d1bcf91b4b8de8963f15512ec40eb3f5c46c62ff replaced the use of a min-heap for the `k-way` merge with a custom (loser) tournament tree. At low threads there is significant improvements but the tree implementation could likely be much better.
 
 **Flamegraph Profile (SiO2 matrix, 8 threads):**
 ![Merge Algorithm Flamegraph](figures/sparse_dense_merge_8-threads_SiO2_flamegraph.svg)
@@ -120,7 +121,7 @@ Improve all parallel implementations until they are somewhat competitive with ea
 
   - `dense_sparse` --- I'm not sure how to improve but the performance *should* be better than it is...
   - `simple` --- could be slightly improved by writing some values directly to `dst` and not collecting those into the workspaces. There is probably some way to improve the workspace reduction step as well.
-  - `merge` --- would most benefit from replacing the `std::collections::binary_heap` with a custom tournament tree. Also not merging values by implementing the `dst` vector ownership scheme would help lots when matrix is well ordered.
+  - `merge` --- Not merging values by implementing the `dst` vector ownership scheme would help lots when matrix is well ordered.
   - `buffer_foreign` --- could have improved cache performance by using a smaller index type for the local indices and encoding the global index with the `block_id`.
 
   All 4 could improve by eliminating allocations in these functions and using the pre-allocated workspace. Large / frequent allocations and ones that were easy to implement using `MemStack` are already done but 3 of these still has some dynamically allocated data structures.
