@@ -7,8 +7,9 @@ use std::thread;
 use faer::{
     Accum, ColMut, ColRef, Index, MatRef, Par,
     dyn_stack::{MemStack, StackReq},
+    prelude::{Reborrow, ReborrowMut},
     sparse::SparseColMatRef,
-    traits::{ComplexField, math_utils::zero},
+    traits::{AddByRef, ComplexField, math_utils::zero},
 };
 
 use crate::spmv_drivers::SpMvStrategy;
@@ -178,6 +179,42 @@ impl<'a, T: ComplexField> LoserTree<'a, T> {
     }
 }
 
+/// Initialize base array with first elements from each column while skipping
+/// elements which this thread can write directly to dst
+fn initialize_leaves<I: Index, T: ComplexField>(
+    slices: &Vec<(&[I], &[T], T)>,
+    row_start: usize,
+    row_end: usize,
+    base_workspace: &mut [Option<Contender<T>>],
+    mut dst_owned: ColMut<T>,
+) -> Vec<usize> {
+    let k = slices.len();
+    let mut merge_ptrs: Vec<usize> = vec![0; k];
+    for (local_col, (indices, values, rhs_k)) in slices.iter().enumerate() {
+        for (i, (row, val)) in indices
+            .iter()
+            .map(|row| row.zx())
+            .zip(values.iter())
+            .enumerate()
+        {
+            merge_ptrs[local_col] = i + 1;
+            if row >= row_start && row < row_end {
+                let contrib = val.mul_by_ref(rhs_k);
+                let local_row = row - row_start;
+                dst_owned[local_row] = dst_owned[local_row].add_by_ref(&contrib);
+            } else {
+                base_workspace[local_col] = Some(Contender {
+                    row,
+                    val: val.clone(),
+                    local_col,
+                });
+                break;
+            }
+        }
+    }
+    merge_ptrs
+}
+
 // NOTE: This merge based algorithm requires row indices to be in sorted order over columns, a soft
 // invariant in faer
 pub fn par_sparse_dense<I: Index, T: ComplexField>(
@@ -218,14 +255,16 @@ pub fn par_sparse_dense<I: Index, T: ComplexField>(
     let mut all_base_slice: &mut [Option<Contender<T>>] = all_base_workspace.as_mut();
     let mut all_losers_slice: &mut [usize] = all_losers_workspace.as_mut();
 
-    thread::scope(|s| {
+    let merged: Vec<Vec<(usize, T)>> = thread::scope(|s| {
         let mut handles = Vec::with_capacity(n_threads);
         let core_ids = core_affinity::get_core_ids().unwrap();
         debug_assert!(core_ids.len() >= n_threads);
 
+        let rows_per_thread = (m + (n_threads - 1)) / n_threads;
         for (tid, core_id) in (0..n_threads).zip(core_ids.into_iter()) {
-            let tree_size = thread_sizes[tid];
+            let dst_rb = dst.rb();
 
+            let tree_size = thread_sizes[tid];
             let (base_workspace, remaining_base) = all_base_slice.split_at_mut(tree_size);
             let (losers_workspace, remaining_losers) = all_losers_slice.split_at_mut(tree_size);
 
@@ -235,18 +274,27 @@ pub fn par_sparse_dense<I: Index, T: ComplexField>(
             let handle = s.spawn(move || {
                 let res = core_affinity::set_for_current(core_id);
                 debug_assert!(res);
+
+                let row_start = tid * rows_per_thread;
+                let row_end = ((tid + 1) * rows_per_thread).min(m);
+                if row_end <= row_start {
+                    panic!(
+                        "Row end is {} and row start is {} for tid {}",
+                        row_end, row_start, tid
+                    );
+                }
+                let owned_rows = row_end - row_start;
+
                 // SAFETY: non-overlapping thread ownership of dst slice
-                //let mut dst_owned = unsafe { dst.subrows(row_start, owned_rows).const_cast() };
-                //if let Accum::Replace = beta {
-                //dst_owned.fill(zero());
-                //}
+                let mut dst_owned = unsafe { dst_rb.subrows(row_start, owned_rows).const_cast() };
+                if let Accum::Replace = beta {
+                    dst_owned.fill(zero());
+                }
 
                 let col_start = strategy.thread_cols[tid];
                 let col_end = strategy.thread_cols[tid + 1];
                 let idx_start = strategy.thread_indptrs[tid];
                 let idx_end = strategy.thread_indptrs[tid + 1];
-
-                let k = 1 + col_end - col_start;
 
                 // (row indices, values, rhs scalar) for each column the thread owns
                 let slices: Vec<(&[I], &[T], T)> = (col_start..=col_end)
@@ -267,85 +315,83 @@ pub fn par_sparse_dense<I: Index, T: ComplexField>(
                     })
                     .collect();
 
-                // Initialize base array with first elements from each column
-                for (local_col, (indices, values, _)) in slices.iter().enumerate() {
-                    if indices.len() > 0 {
-                        base_workspace[local_col] = Some(Contender {
-                            row: indices[0].zx(),
-                            val: values[0].clone(),
-                            local_col,
-                        });
-                    }
-                }
+                let mut merge_ptrs = initialize_leaves(
+                    &slices,
+                    row_start,
+                    row_end,
+                    base_workspace,
+                    dst_owned.rb_mut(),
+                );
 
-                let mut loser_tree = LoserTree::new(base_workspace, losers_workspace);
-
-                let mut merge_ptrs: Vec<usize> = vec![1; k];
                 // probably don't need this much capacity... but in pathological case we do
                 let mut merged: Vec<(usize, T)> = Vec::with_capacity(m);
+                let mut loser_tree = LoserTree::new(base_workspace, losers_workspace);
 
-                // buffer the first entry so we can unwrap in hot loop
-                if let Some(first_contender) = loser_tree.winner() {
-                    let local_col = first_contender.local_col;
-
-                    merged.push((
-                        first_contender.row,
-                        first_contender.val.mul_by_ref(&slices[local_col].2),
-                    ));
-                    merge_ptrs[local_col] += 1;
-                    if slices[local_col].0.len() > 1 {
-                        let replacement = Contender {
-                            row: slices[local_col].0[1].zx(),
-                            val: slices[local_col].1[1].clone(),
-                            local_col,
-                        };
-                        loser_tree.push(Some(replacement));
-                    } else {
-                        loser_tree.push(None);
-                    }
-
-                    loop {
-                        if let Some(contender) = loser_tree.winner() {
-                            let local_col = contender.local_col;
-                            let last = merged.last_mut().unwrap();
-                            let val = contender.val.mul_by_ref(&slices[local_col].2);
-
+                loop {
+                    if let Some(contender) = loser_tree.winner() {
+                        let local_col = contender.local_col;
+                        let val = contender.val.mul_by_ref(&slices[local_col].2);
+                        if let Some(last) = merged.last_mut() {
                             if last.0 == contender.row {
                                 last.1 = last.1.add_by_ref(&val);
                             } else {
                                 merged.push((contender.row, val));
                             }
-
-                            let current_idx = merge_ptrs[local_col];
-                            if slices[local_col].0.len() > current_idx {
-                                let replacement = Contender {
-                                    row: slices[local_col].0[current_idx].zx(),
-                                    val: slices[local_col].1[current_idx].clone(),
-                                    local_col,
-                                };
-                                loser_tree.push(Some(replacement));
-                            } else {
-                                loser_tree.push(None);
-                            }
-                            merge_ptrs[local_col] += 1;
                         } else {
-                            break;
+                            merged.push((contender.row, val));
                         }
+
+                        let current_idx = &mut merge_ptrs[local_col];
+                        let col_len = slices[local_col].0.len();
+                        // Fill local `dst_owned` with values that don't need to be merged.
+                        // This is a total mess. Might be better with iterator abstractions
+                        if *current_idx < col_len {
+                            let mut row = slices[local_col].0[*current_idx].zx();
+                            if row >= row_start && row < row_end {
+                                let rhs_k = &slices[local_col].2;
+                                while row < row_end {
+                                    let contrib =
+                                        slices[local_col].1[*current_idx].mul_by_ref(rhs_k);
+                                    let local_row = row - row_start;
+                                    dst_owned[local_row] =
+                                        dst_owned[local_row].add_by_ref(&contrib);
+                                    *current_idx += 1;
+                                    if *current_idx < col_len {
+                                        row = slices[local_col].0[*current_idx].zx();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Add replacement contender to the tournament
+                        if *current_idx < col_len {
+                            let replacement = Contender {
+                                row: slices[local_col].0[*current_idx].zx(),
+                                val: slices[local_col].1[*current_idx].clone(),
+                                local_col,
+                            };
+                            loser_tree.push(Some(replacement));
+                            *current_idx += 1;
+                        } else {
+                            loser_tree.push(None);
+                        }
+                    } else {
+                        break;
                     }
                 }
                 merged
             });
             handles.push(handle);
         }
-
-        let mut dst = dst;
-        if let Accum::Replace = beta {
-            dst.fill(zero());
-        }
-        for handle in handles {
-            for (row, val) in handle.join().unwrap() {
-                dst[row] = dst[row].add_by_ref(&val);
-            }
-        }
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
     });
+
+    let mut dst = dst;
+    for vec in merged {
+        for (row, val) in vec {
+            dst[row] = dst[row].add_by_ref(&val);
+        }
+    }
 }
