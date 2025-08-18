@@ -57,77 +57,77 @@
 
 | Matrix | Dimensions | Non-zeros | 2 Threads | 4 Threads | 8 Threads | 16 Threads | 32 Threads | 64 Threads |
 |--------|------------|-----------|-----------:|-----------:|-----------:|-----------:|-----------:|-----------:|
-| **anisotropy_3d_1r** | 84315x84315 | 1,373,557 | **1.178 ms** | 1.720 ms | 2.656 ms | 5.182 ms | 9.358 ms | 17.568 ms |
-| **boneS01_M** | 127224x127224 | 2,238,384 | 1.961 ms | **1.396 ms** | 3.301 ms | 7.596 ms | 13.079 ms | 25.181 ms |
-| **boneS01** | 127224x127224 | 5,516,602 | 3.022 ms | **2.807 ms** | 4.123 ms | 5.961 ms | 13.190 ms | 25.248 ms |
-| **Ga3As3H12** | 61349x61349 | 5,970,947 | 3.561 ms | **2.182 ms** | 2.791 ms | 4.431 ms | 7.841 ms | 14.329 ms |
-| **rajat30** | 643994x643994 | 6,175,244 | **5.997 ms** | 9.613 ms | 12.934 ms | 22.932 ms | 53.521 ms | 84.133 ms |
-| **m_t1** | 97578x97578 | 9,753,570 | 4.197 ms | **2.225 ms** | 4.182 ms | 6.611 ms | 11.292 ms | 20.615 ms |
-| **anisotropy_3d_2r** | 650621x650621 | 10,895,827 | **8.913 ms** | 10.466 ms | 16.218 ms | 29.897 ms | 58.631 ms | 96.402 ms |
-| **SiO2** | 155331x155331 | 11,283,503 | 5.102 ms | **3.433 ms** | 4.590 ms | 10.145 ms | 17.102 ms | 31.181 ms |
-| **pwtk** | 217918x217918 | 11,524,432 | 5.671 ms | **5.162 ms** | 7.297 ms | 12.558 ms | 22.406 ms | 40.955 ms |
-| **anisotropy_2d** | 1313281x1313281 | 11,763,231 | **14.165 ms** | 14.981 ms | 25.664 ms | 49.752 ms | 82.302 ms | 103.043 ms |
-| **kkt_power** | 2063494x2063494 | 12,771,361 | **20.019 ms** | 24.895 ms | 42.751 ms | 74.293 ms | 137.086 ms | 146.277 ms |
-| **crankseg_2** | 63838x63838 | 14,148,858 | 5.365 ms | **3.471 ms** | 3.649 ms | 5.083 ms | 9.216 ms | 15.423 ms |
-| **Freescale2** | 2999349x2999349 | 14,313,235 | **22.957 ms** | 35.872 ms | 46.448 ms | 78.706 ms | 117.297 ms | 149.274 ms |
-| **spe10_0** | 1159366x1159366 | 28,730,252 | **14.514 ms** | 14.654 ms | 30.533 ms | 53.896 ms | 90.757 ms | 127.551 ms |
+| **anisotropy_3d_1r** | 84315x84315 | 1,373,557 | **1.423 ms** | 1.608 ms | 1.846 ms | 5.183 ms | 9.425 ms | 18.056 ms |
+| **boneS01_M** | 127224x127224 | 2,238,384 | **1.681 ms** | 2.391 ms | 1.773 ms | 6.652 ms | 13.074 ms | 25.180 ms |
+| **boneS01** | 127224x127224 | 5,516,602 | 3.007 ms | **1.706 ms** | 2.527 ms | 5.996 ms | 13.173 ms | 25.150 ms |
+| **Ga3As3H12** | 61349x61349 | 5,970,947 | 2.741 ms | **1.618 ms** | 1.724 ms | 3.902 ms | 7.232 ms | 14.017 ms |
+| **rajat30** | 643994x643994 | 6,175,244 | 10.083 ms | **9.675 ms** | 16.204 ms | 23.940 ms | 47.405 ms | 73.078 ms |
+| **m_t1** | 97578x97578 | 9,753,570 | 4.136 ms | **2.183 ms** | 2.780 ms | 5.144 ms | 10.499 ms | 20.418 ms |
+| **anisotropy_3d_2r** | 650621x650621 | 10,895,827 | **10.203 ms** | 11.030 ms | 17.117 ms | 31.243 ms | 48.747 ms | 74.118 ms |
+| **SiO2** | 155331x155331 | 11,283,503 | 5.544 ms | **4.500 ms** | 4.505 ms | 8.091 ms | 15.693 ms | 29.410 ms |
+| **pwtk** | 217918x217918 | 11,524,432 | 5.669 ms | **4.869 ms** | 5.845 ms | 9.560 ms | 21.260 ms | 37.996 ms |
+| **anisotropy_2d** | 1313281x1313281 | 11,763,231 | **15.992 ms** | 17.215 ms | 29.596 ms | 46.397 ms | 67.757 ms | 87.176 ms |
+| **kkt_power** | 2063494x2063494 | 12,771,361 | **18.571 ms** | 24.969 ms | 42.206 ms | 58.943 ms | 89.364 ms | 103.787 ms |
+| **crankseg_2** | 63838x63838 | 14,148,858 | 5.502 ms | 3.638 ms | **2.830 ms** | 4.048 ms | 7.805 ms | 14.608 ms |
+| **Freescale2** | 2999349x2999349 | 14,313,235 | **24.630 ms** | 33.728 ms | 52.137 ms | 69.512 ms | 86.582 ms | 106.590 ms |
+| **spe10_0** | 1159366x1159366 | 28,730,252 | **17.520 ms** | 17.672 ms | 27.545 ms | 43.047 ms | 67.635 ms | 85.963 ms |
 
 # Parallel Thread Scaling Results - Sparse-Dense Multiplication (`merge`)
 
 | Matrix | Dimensions | Non-zeros | 2 Threads | 4 Threads | 8 Threads | 16 Threads | 32 Threads | 64 Threads |
 |--------|------------|-----------|-----------:|-----------:|-----------:|-----------:|-----------:|-----------:|
-| **anisotropy_3d_1r** | 84315x84315 | 1,373,557 | 54.988 ms | 25.422 ms | 12.013 ms | 6.199 ms | **3.448 ms** | 3.916 ms |
-| **boneS01_M** | 127224x127224 | 2,238,384 | 91.268 ms | 42.853 ms | 20.720 ms | 9.289 ms | 5.017 ms | **4.844 ms** |
-| **boneS01** | 127224x127224 | 5,516,602 | 207.268 ms | 100.250 ms | 49.727 ms | 21.554 ms | 9.779 ms | **8.010 ms** |
-| **Ga3As3H12** | 61349x61349 | 5,970,947 | 214.178 ms | 107.415 ms | 54.199 ms | 25.470 ms | 12.949 ms | **8.547 ms** |
-| **rajat30** | 643994x643994 | 6,175,244 | 324.679 ms | 163.944 ms | 79.630 ms | 37.329 ms | 17.760 ms | **10.933 ms** |
-| **m_t1** | 97578x97578 | 9,753,570 | 308.541 ms | 147.070 ms | 69.212 ms | 31.976 ms | 14.460 ms | **11.001 ms** |
-| **anisotropy_3d_2r** | 650621x650621 | 10,895,827 | 763.200 ms | 396.475 ms | 184.848 ms | 82.039 ms | 33.419 ms | **20.768 ms** |
-| **SiO2** | 155331x155331 | 11,283,503 | 465.002 ms | 259.337 ms | 141.368 ms | 61.007 ms | 27.714 ms | **15.597 ms** |
-| **pwtk** | 217918x217918 | 11,524,432 | 377.989 ms | 180.444 ms | 88.143 ms | 42.375 ms | 19.234 ms | **12.403 ms** |
-| **anisotropy_2d** | 1313281x1313281 | 11,763,231 | 809.425 ms | 361.456 ms | 181.007 ms | 77.541 ms | 35.789 ms | **24.168 ms** |
-| **kkt_power** | 2063494x2063494 | 12,771,361 | 975.454 ms | 483.624 ms | 240.553 ms | 109.980 ms | 49.125 ms | **26.578 ms** |
-| **crankseg_2** | 63838x63838 | 14,148,858 | 499.170 ms | 234.328 ms | 107.159 ms | 50.480 ms | 22.448 ms | **15.361 ms** |
-| **Freescale2** | 2999349x2999349 | 14,313,235 | 1037.336 ms | 503.427 ms | 265.761 ms | 128.639 ms | 59.558 ms | **35.372 ms** |
-| **spe10_0** | 1159366x1159366 | 28,730,252 | 1437.739 ms | 705.445 ms | 346.115 ms | 155.297 ms | 69.582 ms | **44.990 ms** |
+| **anisotropy_3d_1r** | 84315x84315 | 1,373,557 | 46.027 ms | 23.698 ms | 13.013 ms | 6.901 ms | **4.272 ms** | 4.636 ms |
+| **boneS01_M** | 127224x127224 | 2,238,384 | 64.197 ms | 33.244 ms | 16.235 ms | 8.315 ms | **5.087 ms** | 5.173 ms |
+| **boneS01** | 127224x127224 | 5,516,602 | 157.532 ms | 79.794 ms | 41.545 ms | 19.376 ms | 9.325 ms | **8.196 ms** |
+| **Ga3As3H12** | 61349x61349 | 5,970,947 | 160.232 ms | 80.540 ms | 44.760 ms | 20.114 ms | 10.431 ms | **8.175 ms** |
+| **rajat30** | 643994x643994 | 6,175,244 | 240.665 ms | 124.560 ms | 65.830 ms | 37.869 ms | 17.760 ms | **10.933 ms** |
+| **m_t1** | 97578x97578 | 9,753,570 | 210.737 ms | 104.975 ms | 52.912 ms | 26.032 ms | 12.509 ms | **8.999 ms** |
+| **anisotropy_3d_2r** | 650621x650621 | 10,895,827 | 572.074 ms | 319.229 ms | 154.326 ms | 71.736 ms | 34.607 ms | **26.129 ms** |
+| **SiO2** | 155331x155331 | 11,283,503 | 345.297 ms | 188.814 ms | 108.915 ms | 49.170 ms | 23.056 ms | **13.946 ms** |
+| **pwtk** | 217918x217918 | 11,524,432 | 285.287 ms | 141.688 ms | 70.195 ms | 36.262 ms | 17.371 ms | **11.454 ms** |
+| **anisotropy_2d** | 1313281x1313281 | 11,763,231 | 507.598 ms | 248.342 ms | 130.764 ms | 68.589 ms | 39.184 ms | **29.473 ms** |
+| **kkt_power** | 2063494x2063494 | 12,771,361 | 716.679 ms | 377.466 ms | 203.521 ms | 104.020 ms | 59.304 ms | **42.749 ms** |
+| **crankseg_2** | 63838x63838 | 14,148,858 | 348.770 ms | 171.245 ms | 81.409 ms | 40.826 ms | 19.112 ms | **12.937 ms** |
+| **Freescale2** | 2999349x2999349 | 14,313,235 | 771.096 ms | 402.567 ms | 232.167 ms | 127.058 ms | 76.204 ms | **56.456 ms** |
+| **spe10_0** | 1159366x1159366 | 28,730,252 | 925.878 ms | 469.055 ms | 240.338 ms | 115.942 ms | 59.656 ms | **45.178 ms** |
 
 # Parallel Thread Scaling Results - Sparse-Dense Multiplication (`buffer_foreign`)
 
 | Matrix | Dimensions | Non-zeros | 2 Threads | 4 Threads | 8 Threads | 16 Threads | 32 Threads | 64 Threads |
 |--------|------------|-----------|-----------:|-----------:|-----------:|-----------:|-----------:|-----------:|
-| **anisotropy_3d_1r** | 84315x84315 | 1,373,557 | **5.217 ms** | 8.547 ms | 12.008 ms | 19.141 ms | 30.407 ms | 54.323 ms |
-| **boneS01_M** | 127224x127224 | 2,238,384 | **4.250 ms** | 4.619 ms | 7.074 ms | 22.370 ms | 35.602 ms | 58.183 ms |
-| **boneS01** | 127224x127224 | 5,516,602 | 8.231 ms | **7.301 ms** | 9.288 ms | 27.443 ms | 43.519 ms | 71.422 ms |
-| **Ga3As3H12** | 61349x61349 | 5,970,947 | 15.222 ms | **14.338 ms** | 21.751 ms | 31.832 ms | 45.051 ms | 75.867 ms |
+| **anisotropy_3d_1r** | 84315x84315 | 1,373,557 | **5.187 ms** | 8.057 ms | 11.470 ms | 17.145 ms | 26.927 ms | 46.329 ms |
+| **boneS01_M** | 127224x127224 | 2,238,384 | 4.530 ms | **4.513 ms** | 6.458 ms | 19.787 ms | 31.899 ms | 50.437 ms |
+| **boneS01** | 127224x127224 | 5,516,602 | 8.865 ms | **7.305 ms** | 8.704 ms | 24.397 ms | 39.757 ms | 62.088 ms |
+| **Ga3As3H12** | 61349x61349 | 5,970,947 | **14.292 ms** | 15.582 ms | 23.906 ms | 30.534 ms | 41.935 ms | 67.292 ms |
 | **rajat30** | 643994x643994 | 6,175,244 | **15.256 ms** | 16.779 ms | 25.734 ms | 35.870 ms | 50.078 ms | 77.418 ms |
-| **m_t1** | 97578x97578 | 9,753,570 | **13.958 ms** | 21.972 ms | 20.675 ms | 35.569 ms | 49.169 ms | 77.567 ms |
-| **anisotropy_3d_2r** | 650621x650621 | 10,895,827 | 36.017 ms | 26.440 ms | **23.749 ms** | 33.898 ms | 57.569 ms | 85.504 ms |
-| **SiO2** | 155331x155331 | 11,283,503 | **27.374 ms** | 28.446 ms | 34.292 ms | 35.238 ms | 54.773 ms | 87.364 ms |
-| **pwtk** | 217918x217918 | 11,524,432 | 18.436 ms | **15.642 ms** | 21.232 ms | 34.602 ms | 55.471 ms | 83.504 ms |
-| **anisotropy_2d** | 1313281x1313281 | 11,763,231 | 41.995 ms | 31.409 ms | **25.156 ms** | 35.812 ms | 54.192 ms | 88.255 ms |
-| **kkt_power** | 2063494x2063494 | 12,771,361 | 58.550 ms | **36.908 ms** | 37.834 ms | 38.576 ms | 55.739 ms | 89.464 ms |
-| **crankseg_2** | 63838x63838 | 14,148,858 | 32.904 ms | **29.583 ms** | 29.953 ms | 37.467 ms | 54.488 ms | 81.432 ms |
-| **Freescale2** | 2999349x2999349 | 14,313,235 | 66.778 ms | 38.397 ms | **30.730 ms** | 38.892 ms | 54.815 ms | 87.399 ms |
-| **spe10_0** | 1159366x1159366 | 28,730,252 | 38.327 ms | 23.532 ms | **19.437 ms** | 42.973 ms | 71.386 ms | 102.811 ms |
+| **m_t1** | 97578x97578 | 9,753,570 | **13.226 ms** | 21.198 ms | 19.711 ms | 33.413 ms | 43.010 ms | 69.144 ms |
+| **anisotropy_3d_2r** | 650621x650621 | 10,895,827 | 38.050 ms | 26.701 ms | **23.158 ms** | 32.248 ms | 50.332 ms | 76.106 ms |
+| **SiO2** | 155331x155331 | 11,283,503 | **27.920 ms** | 28.469 ms | 30.985 ms | 34.166 ms | 49.020 ms | 75.510 ms |
+| **pwtk** | 217918x217918 | 11,524,432 | 19.879 ms | **18.614 ms** | 20.794 ms | 32.077 ms | 46.124 ms | 71.367 ms |
+| **anisotropy_2d** | 1313281x1313281 | 11,763,231 | 43.877 ms | 31.413 ms | **26.757 ms** | 34.402 ms | 48.894 ms | 76.011 ms |
+| **kkt_power** | 2063494x2063494 | 12,771,361 | 69.628 ms | 47.323 ms | 38.422 ms | **34.839 ms** | 49.889 ms | 78.684 ms |
+| **crankseg_2** | 63838x63838 | 14,148,858 | 34.242 ms | **27.193 ms** | 28.772 ms | 35.958 ms | 46.926 ms | 72.506 ms |
+| **Freescale2** | 2999349x2999349 | 14,313,235 | 66.203 ms | 38.933 ms | **30.083 ms** | 36.412 ms | 50.059 ms | 76.614 ms |
+| **spe10_0** | 1159366x1159366 | 28,730,252 | 42.254 ms | 25.966 ms | **22.690 ms** | 41.291 ms | 61.848 ms | 80.971 ms |
 
 # Parallel Thread Scaling Results - Dense-Sparse Multiplication (`dense_sparse`)
 
 | Matrix | Dimensions | Non-zeros | 2 Threads | 4 Threads | 8 Threads | 16 Threads | 32 Threads | 64 Threads |
 |--------|------------|-----------|-----------:|-----------:|-----------:|-----------:|-----------:|-----------:|
-| **anisotropy_3d_1r** | 84315x84315 | 1,373,557 | 1.555 ms | 892.46 µs | **621.84 µs** | 637.06 µs | 1.162 ms | 2.496 ms |
-| **boneS01_M** | 127224x127224 | 2,238,384 | 2.337 ms | 1.327 ms | 879.83 µs | **794.14 µs** | 1.278 ms | 2.602 ms |
-| **boneS01** | 127224x127224 | 5,516,602 | 6.490 ms | 3.391 ms | 1.911 ms | **1.367 ms** | 1.903 ms | 2.770 ms |
-| **Ga3As3H12** | 61349x61349 | 5,970,947 | 8.916 ms | 4.729 ms | 2.508 ms | **1.575 ms** | 1.721 ms | 2.903 ms |
+| **anisotropy_3d_1r** | 84315x84315 | 1,373,557 | 1.560 ms | 983.67 µs | **704.19 µs** | 739.36 µs | 1.356 ms | 2.772 ms |
+| **boneS01_M** | 127224x127224 | 2,238,384 | 2.445 ms | 1.449 ms | 980.10 µs | **870.85 µs** | 1.518 ms | 2.914 ms |
+| **boneS01** | 127224x127224 | 5,516,602 | 6.639 ms | 3.589 ms | 2.033 ms | **1.393 ms** | 1.762 ms | 3.064 ms |
+| **Ga3As3H12** | 61349x61349 | 5,970,947 | 8.799 ms | 4.752 ms | 2.554 ms | **1.555 ms** | 1.597 ms | 2.928 ms |
 | **rajat30** | 643994x643994 | 6,175,244 | 8.468 ms | 5.518 ms | 3.365 ms | **2.955 ms** | 3.220 ms | 3.951 ms |
-| **m_t1** | 97578x97578 | 9,753,570 | 13.865 ms | 7.096 ms | 3.728 ms | 2.328 ms | **2.051 ms** | 3.583 ms |
-| **anisotropy_3d_2r** | 650621x650621 | 10,895,827 | 12.032 ms | 6.786 ms | 4.266 ms | **3.933 ms** | 4.428 ms | 5.069 ms |
-| **SiO2** | 155331x155331 | 11,283,503 | 15.575 ms | 8.803 ms | 4.634 ms | 3.081 ms | **2.385 ms** | 3.979 ms |
-| **pwtk** | 217918x217918 | 11,524,432 | 13.999 ms | 7.244 ms | 3.847 ms | 2.715 ms | **2.558 ms** | 3.907 ms |
-| **anisotropy_2d** | 1313281x1313281 | 11,763,231 | 14.197 ms | 8.632 ms | **6.477 ms** | 6.607 ms | 6.871 ms | 7.287 ms |
-| **kkt_power** | 2063494x2063494 | 12,771,361 | 19.783 ms | 13.270 ms | 10.055 ms | **9.447 ms** | 10.223 ms | 10.924 ms |
-| **crankseg_2** | 63838x63838 | 14,148,858 | 22.046 ms | 11.282 ms | 5.743 ms | 3.229 ms | **2.438 ms** | 3.779 ms |
-| **Freescale2** | 2999349x2999349 | 14,313,235 | 25.521 ms | 17.482 ms | 14.631 ms | **14.065 ms** | 16.918 ms | 17.668 ms |
-| **spe10_0** | 1159366x1159366 | 28,730,252 | 30.893 ms | 17.045 ms | 9.942 ms | **8.649 ms** | 8.663 ms | 9.842 ms |
+| **m_t1** | 97578x97578 | 9,753,570 | 14.022 ms | 7.249 ms | 3.898 ms | 2.301 ms | **1.947 ms** | 3.154 ms |
+| **anisotropy_3d_2r** | 650621x650621 | 10,895,827 | 12.412 ms | 7.689 ms | 5.225 ms | 4.043 ms | **3.958 ms** | 5.088 ms |
+| **SiO2** | 155331x155331 | 11,283,503 | 15.683 ms | 9.011 ms | 4.834 ms | 2.845 ms | **2.197 ms** | 3.334 ms |
+| **pwtk** | 217918x217918 | 11,524,432 | 14.281 ms | 7.537 ms | 4.217 ms | 2.669 ms | **2.335 ms** | 3.516 ms |
+| **anisotropy_2d** | 1313281x1313281 | 11,763,231 | 14.627 ms | 10.489 ms | 8.403 ms | **7.146 ms** | 7.261 ms | 7.877 ms |
+| **kkt_power** | 2063494x2063494 | 12,771,361 | 20.987 ms | 16.328 ms | 11.260 ms | 10.064 ms | **9.534 ms** | 11.855 ms |
+| **crankseg_2** | 63838x63838 | 14,148,858 | 22.174 ms | 11.298 ms | 5.839 ms | 3.207 ms | **2.366 ms** | 3.264 ms |
+| **Freescale2** | 2999349x2999349 | 14,313,235 | 26.102 ms | 20.602 ms | 15.243 ms | 13.930 ms | **13.751 ms** | 15.512 ms |
+| **spe10_0** | 1159366x1159366 | 28,730,252 | 31.248 ms | 18.012 ms | 11.044 ms | 7.737 ms | **6.655 ms** | 7.586 ms |
 
 ## Thread Scaling Plots
 
@@ -259,21 +259,18 @@ Core(s) per socket:                   64
 Socket(s):                            1
 Stepping:                             1
 Frequency boost:                      enabled
-CPU(s) scaling MHz:                   78%
+CPU(s) scaling MHz:                   99%
 CPU max MHz:                          3718.0659
 CPU min MHz:                          1500.0000
-BogoMIPS:                             4892.78
-Flags:                                fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 pcid sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local avx512_bf16 clzero irperf xsaveerptr rdpru wbnoinvd amd_ppin cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif x2avic v_spec_ctrl vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid overflow_recov succor smca fsrm flush_l1d debug_swap
+BogoMIPS:                             4892.31
+Flags:                                fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local avx512_bf16 clzero irperf xsaveerptr rdpru wbnoinvd amd_ppin cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif x2avic v_spec_ctrl vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid overflow_recov succor smca fsrm flush_l1d debug_swap
 Virtualization:                       AMD-V
 L1d cache:                            2 MiB (64 instances)
 L1i cache:                            2 MiB (64 instances)
 L2 cache:                             64 MiB (64 instances)
 L3 cache:                             256 MiB (8 instances)
-NUMA node(s):                         4
-NUMA node0 CPU(s):                    0-15
-NUMA node1 CPU(s):                    16-31
-NUMA node2 CPU(s):                    32-47
-NUMA node3 CPU(s):                    48-63
+NUMA node(s):                         1
+NUMA node0 CPU(s):                    0-63
 Vulnerability Gather data sampling:   Not affected
 Vulnerability Itlb multihit:          Not affected
 Vulnerability L1tf:                   Not affected
