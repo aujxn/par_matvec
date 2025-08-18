@@ -116,6 +116,7 @@ pub fn par_sparse_dense<I: Index, T: ComplexField>(
 }
 
 /// somehow this is slower than `reduce_workspaces_rayon` variant
+#[allow(dead_code)]
 fn reduce_workspaces_threaded<T: ComplexField>(n_threads: usize, work: MatRef<T>, dst: ColMut<T>) {
     let rows_per_thread = (work.nrows() + (n_threads - 1)) / n_threads;
     thread::scope(|s| {
@@ -143,6 +144,7 @@ fn reduce_workspaces_threaded<T: ComplexField>(n_threads: usize, work: MatRef<T>
 }
 
 /// somehow this is faster than `reduce_workspaces_threaded` variant
+#[allow(dead_code)]
 fn reduce_workspaces_rayon<T: ComplexField>(n_threads: usize, work: MatRef<T>, dst: ColMut<T>) {
     let rows_per_thread = (work.nrows() + (n_threads - 1)) / n_threads;
     // This seems janky could probably improve lots

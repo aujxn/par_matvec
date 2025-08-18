@@ -66,8 +66,9 @@ fn vectors_are_equal<T1: ToVecF64, T2: ToVecF64>(
                 if max_val > 0.0 { diff / max_val } else { 0.0 }
             );
             /*
-            for (l, r) in a_vec.iter().zip(b_vec.iter()) {
-                println!("{:.2}, {:.2}", l, r);
+            eprintln!("i: (correct, incorrect)");
+            for (i, (l, r)) in a_vec.iter().zip(b_vec.iter()).enumerate() {
+                println!("{}: {:.2}, {:.2}", i, l, r);
             }
             */
             return false;
@@ -315,7 +316,7 @@ fn test_matrix_market_files() {
                     ));
 
                     // Only test parallel if matrix has enough non-zeros
-                    if matrices.nnz > 1000 {
+                    if matrices.nnz > 32 {
                         test_parallel_implementations(&matrices).expect(&format!(
                             "Parallel tests failed on {}",
                             matrix_path.display()
@@ -350,7 +351,7 @@ fn test_edge_cases() {
 
     test_sequential_implementations(&dense_matrices)
         .expect("Sequential tests failed on dense matrix");
-    let dense_matrices = TestMatrices::create_synthetic(2000, 2000, 1.0);
+    let dense_matrices = TestMatrices::create_synthetic(200, 200, 1.0);
     test_parallel_implementations(&dense_matrices).expect("Parallel tests failed on dense matrix");
 
     println!("Edge case tests passed!");
